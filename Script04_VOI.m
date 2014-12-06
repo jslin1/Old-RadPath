@@ -262,7 +262,7 @@ ctr_vector_unit = ctr_vector2/norm(ctr_vector2);
 site = 'P1C';
 ptno = sprintf(['%02d'],ii);
 ptno_site = sprintf(['%02d_' site],ii);
-mask_title = [ptno_site '_Mask'];
+ptno_site_mask = [ptno_site '_Mask'];
 
 temp_series = mksqlite(['select * from Series where StudyInstanceUID = ''' studies_all(ii).StudyInstanceUID ''' '...
     'and SeriesDescription like ''%FLAIR%'' '...
@@ -273,56 +273,86 @@ Descrip_UID = sprintf([ Descrip '_' UID]); % patient #, Descrip, SeriesInstanceU
 
 % Resample at high rez
 file = load_nii([script01_prefix '07_HistMatch/Brain_HistMatch_' UID '.nii.gz']);
-% file = load_nii([script01_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']);
+file = load_nii([script01_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']);
 imgdim = [file.hdr.dime.dim(2:4)]; % # pixels - ijk
 srow_x = file.hdr.hist.srow_x; % [ITK k] % xyz --> kij
 srow_y = file.hdr.hist.srow_y; % [ITK i]
 srow_z = file.hdr.hist.srow_z; % [ITK j]
-
 mask = zeros(imgdim);
-tt_ctr_limit = 4.5; % height/2 = 9/2 = 4.5 mm
-step = 0.01; % mm
-for tt_ctr  = -tt_ctr_limit:step:tt_ctr_limit % inch along cylinder
-    tt_ctr
-    ctr_point = start_point + ctr_vector_unit*tt_ctr;
-    a = ctr_point(1); % Point on line
-    b = ctr_point(2);
-    c = ctr_point(3);
 
-    u = ctr_vector_unit(1); % center vector
-    v = ctr_vector_unit(2);
-    w = ctr_vector_unit(3);
+choice = 2; % cylinder = 1, sphere = 2
+if choice == 1
+    tt_ctr_limit = 4.5; % height/2 = 9/2 = 4.5 mm
+    step = 0.01; % mm
+    for tt_ctr  = -tt_ctr_limit:step:tt_ctr_limit % inch along cylinder
+        tt_ctr
+        ctr_point = start_point + ctr_vector_unit*tt_ctr;
+        a = ctr_point(1); % Point on line
+        b = ctr_point(2);
+        c = ctr_point(3);
 
-    x = 1; % Perp vector = [1 1 -(A+B)/C]
-    y = 1;
-    z = -(u + v)/w;
+        u = ctr_vector_unit(1); % center vector
+        v = ctr_vector_unit(2);
+        w = ctr_vector_unit(3);
+
+        x = 1; % Perp vector = [1 1 -(A+B)/C]
+        y = 1;
+        z = -(u + v)/w;
+
+        deg = 0:1:360; % degrees by which it should be rotated
+        ct = cos(deg*pi/180);
+        st = sin(deg*pi/180);
+
+        % Rotate 360 degrees, simultaneously
+        edge_vector_rot = [ (a*(v^2+w^2)-u*(b*v+c*w-u*x-v*y-w*z))*(1-ct)+x*ct+(-c*v+b*w-w*y+v*z)*st
+        (b*(u^2+w^2)-v*(a*u+c*w-u*x-v*y-w*z))*(1-ct)+y*ct+(c*u-a*w+w*x-u*z)*st
+        (c*(u^2+v^2)-w*(a*u+b*v-u*x-v*y-w*z))*(1-ct)+z*ct+(-b*u+a*v-v*x+u*y)*st ]';
+        norm_evr=sqrt(sum(edge_vector_rot.^2,2));
+        evr_unit = edge_vector_rot./[norm_evr norm_evr norm_evr];
+        edge_limit = .735; % radius = 1.47/2 = .7350
+
+        for tt_edge = -edge_limit:step:edge_limit 
+            edge_point = repmat([a b c],size(evr_unit,1),1) + evr_unit*tt_edge;
+            x_new = edge_point(:,1); 
+            y_new = edge_point(:,2); 
+            z_new = edge_point(:,3); 
+
+            % ITK xyz -> ITK kij
+            k = double(round(1 + (-x_new - srow_x(4))/srow_x(3))); % ITK k
+            i = double(round(1 + (-y_new - srow_y(4))/srow_y(1))); % ITK i
+            j = double(round(1 + (z_new - srow_z(4))/srow_z(2))); % ITK j
+            idx_cyl = sub2ind(size(mask),i,j,k);
+            mask(idx_cyl)=1; % for close voxels, mask = 1
+        end % inching along edge vector
+    end % inch along center line
+    ptno_site_mask_shape = [ptno_site_mask '_Cyl'];
+elseif choice == 2 % Sphere
+      
+    % imgdim = [5 4 2];
+    [j_all i_all k_all] = meshgrid(1:imgdim(2),1:imgdim(1),1:imgdim(3));
     
-    deg = 0:1:360; % degrees by which it should be rotated
-    ct = cos(deg*pi/180);
-    st = sin(deg*pi/180);
+    % IJK coordinates --> XYZ
+    x_all = -((srow_x(1)*(i_all-1)) + (srow_x(2)*(j_all-1)) + (srow_x(3)*(k_all-1)) + srow_x(4));
+    y_all = -((srow_y(1)*(i_all-1)) + (srow_y(2)*(j_all-1)) + (srow_y(3)*(k_all-1)) + srow_y(4));
+    z_all = (srow_z(1)*(i_all-1)) + (srow_z(2)*(j_all-1)) + (srow_z(3)*(k_all-1)) + srow_z(4);
     
-    % Rotate 360 degrees, simultaneously
-    edge_vector_rot = [ (a*(v^2+w^2)-u*(b*v+c*w-u*x-v*y-w*z))*(1-ct)+x*ct+(-c*v+b*w-w*y+v*z)*st
-    (b*(u^2+w^2)-v*(a*u+c*w-u*x-v*y-w*z))*(1-ct)+y*ct+(c*u-a*w+w*x-u*z)*st
-    (c*(u^2+v^2)-w*(a*u+b*v-u*x-v*y-w*z))*(1-ct)+z*ct+(-b*u+a*v-v*x+u*y)*st ]';
-    norm_evr=sqrt(sum(edge_vector_rot.^2,2));
-    evr_unit = edge_vector_rot./[norm_evr norm_evr norm_evr];
-    edge_limit = .735; % radius = 1.47/2 = .7350
+    % Calculate XYZ coordinates, check if < 5mm distance from start_point
+    x_diff = x_all - start_point(1);
+    y_diff = y_all - start_point(2);
+    z_diff = z_all - start_point(3);
+    xyz_dist = sqrt(x_diff.^2+y_diff.^2+z_diff.^2);   
+    idx_sphere = find(xyz_dist(:) < 2.5); % 2.5 mm radius, 5 mm diameter
+    mask(idx_sphere)=1; % for close voxels, mask = 1
+    ptno_site_mask_shape = [ptno_site_mask '_Sphere'];
+end
 
-    for tt_edge = -edge_limit:step:edge_limit 
-        edge_point = repmat([a b c],size(evr_unit,1),1) + evr_unit*tt_edge;
-        x_new = edge_point(:,1); 
-        y_new = edge_point(:,2); 
-        z_new = edge_point(:,3); 
 
-        % ITK xyz -> ITK kij
-        k = double(round(1 + (-x_new - srow_x(4))/srow_x(3))); % ITK k
-        i = double(round(1 + (-y_new - srow_y(4))/srow_y(1))); % ITK i
-        j = double(round(1 + (z_new - srow_z(4))/srow_z(2))); % ITK j
-        idx = sub2ind(size(mask),i,j,k);
-        mask(idx)=1; % for close voxels, mask = 1
-    end % inching along edge vector
-end % inch along center line
+
+
+
+
+
+
 
 %%
 close all
@@ -345,11 +375,11 @@ for ee = 93%[290 300 313 330 350]% sagittal - 265:5:290
 %     figure; imagesc(squeeze(img_x_mask_resample.img(:,:,ee))); colormap gray; axis off; title(num2str(ee))
 end
 
-% Save mask as nii.gz file
+%
 holder = make_nii(mask,... % Image
     [file.hdr.dime.pixdim(2:4)], ... % Pixel dimensions - ijk
     [srow_x(4) srow_y(4) srow_z(4)],... % origin - xyz
-    64,mask_title); % datatype: 64 = float64 = double, Description
+    64,ptno_site_mask_shape); % datatype: 64 = float64 = double, Description
 holder.hdr = file.hdr; % Valid bc I commented out the x_form_nii command in load_nii,which changed qform/sform and applied a transform to the data
 % holder.hdr.hist
 % holder.hdr.dime
@@ -362,20 +392,38 @@ if ~isdir(script04_prefix_results)
     mkdir(script04_prefix_results)
 end
 
-save_nii(holder, [script04_prefix_results mask_title '_Resample.nii.gz']) % 2.15 min - Commented out the hdr qform, sform
-system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-    '-g ' script04_prefix mask_title '_Resample.nii.gz']) % 1.15 min
-system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-    '-g ' script01_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz '...
-    '-s ' script04_prefix mask_title '_Resample.nii.gz']) % 1.15 min
+if choice == 1 % Cylinder
+    save_nii(holder, [script04_prefix_results ptno_site_mask '_Cyl_Resample.nii.gz']) % 2.15 min - Commented out the hdr qform, sform
+    system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
+        '-g ' script04_prefix_results ptno_site_mask '_Cyl_Resample.nii.gz']) % 1.15 min
+    system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
+        '-g ' script01_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz '...
+        '-s ' script04_prefix_results ptno_site_mask '_Cyl_Resample.nii.gz']) % 1.15 min
 
-% Original size
-save_nii(holder, [script04_prefix_results mask_title '.nii.gz']) % 2.15 min - Commented out the hdr qform, sform
-system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-    '-g ' script04_prefix mask_title '.nii.gz']) % 1.15 min
-system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-    '-g ' file.fileprefix '.nii.gz '...
-    '-s ' script04_prefix mask_title '.nii.gz']) % 1.15 min
+    % Original size
+    save_nii(holder, [script04_prefix_results ptno_site_mask '_Cyl.nii.gz']) % 2.15 min - Commented out the hdr qform, sform
+    system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
+        '-g ' script04_prefix ptno_site_mask '_Cyl.nii.gz']) % 1.15 min
+    system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
+        '-g ' file.fileprefix '.nii.gz '...
+        '-s ' script04_prefix ptno_site_mask '_Cyl.nii.gz']) % 1.15 min
+elseif choice == 2 % Sphere
+    save_nii(holder, [script04_prefix_results ptno_site_mask '_Sphere_Resample.nii.gz']) % 2.15 min - Commented out the hdr qform, sform
+    system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
+        '-g ' script04_prefix_results ptno_site_mask '_Sphere_Resample.nii.gz']) % 1.15 min
+    system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
+        '-g ' script01_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz '...
+        '-s ' script04_prefix_results ptno_site_mask '_Sphere_Resample.nii.gz']) % 1.15 min
+
+    save_nii(holder, [script04_prefix_results ptno_site_mask '_Sphere.nii.gz']) % 2.15 min - Commented out the hdr qform, sform
+    system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
+        '-g ' script04_prefix_results ptno_site_mask '_Sphere.nii.gz']) % 1.15 min
+    system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
+        '-g ' file.fileprefix '.nii.gz '...
+        '-s ' script04_prefix_results ptno_site_mask '_Sphere.nii.gz']) % 1.15 min
+end
+
+
 
 
 % Verified same coordinates in Matlab and ITKsnap format - 20141105
@@ -385,7 +433,8 @@ system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksna
 
 %% V. Use VOI mask to save mean, sd, histogram in .mat file
 
-mask_resample = load_nii([script04_prefix mask_title '_Resample.nii.gz']); 
+mask_resample = load_nii([script04_prefix_results ptno_site_mask '_Cyl_Resample.nii.gz']); 
+mask_resample = load_nii([script04_prefix_results ptno_site_mask '_Sphere_Resample.nii.gz']); 
 voi_idx=find(mask_resample.img);
 script04_prefix_results = [script04_prefix 'Results/' ptno '/' ptno_site '/'];
 if ~isdir(script04_prefix_results)
@@ -986,7 +1035,7 @@ ii=4;
 site = 'P1C';
 ptno = sprintf(['%02d'],ii);
 ptno_site = sprintf(['%02d_' site],ii);
-mask_title = [ptno_site '_Mask'];
+ptno_site_mask = [ptno_site '_Mask'];
 
 % Anatomical
 temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies_all(ii).StudyInstanceUID ''' '...
@@ -1001,14 +1050,14 @@ Descrip_UID = sprintf([ Descrip '_' UID]); % patient #, Descrip, SeriesInstanceU
 % file2 = load_nii([script01_prefix '10_Warped/Warped_' Descrip_UID '.nii.gz']);
 system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
     '-g ' script01_prefix '10_Warped/Warped_' Descrip_UID '.nii.gz '...
-    '-s ' script04_prefix mask_title '.nii.gz']) % 1.15 min
+    '-s ' script04_prefix ptno_site_mask '.nii.gz']) % 1.15 min
 % system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
 %     '-g ' script01_prefix '07_HistMatch/Brain_HistMatch_' UID '.nii.gz '...
 %     '-s ' script04_prefix mask_title '.nii.gz']) % 1.15 min
 
 system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
     '-g ' script01_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz '...
-    '-s ' script04_prefix mask_title '_Resample.nii.gz']) % 1.15 min
+    '-s ' script04_prefix ptno_site_mask '_Resample.nii.gz']) % 1.15 min
 % Bad registration - T1
 % 4.8X
 
@@ -1024,10 +1073,10 @@ Descrip = strrep(strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescri
 Descrip_UID = sprintf([ Descrip '_' UID]); % patient #, Descrip, SeriesInstanceUID
 system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
     '-g ' script02_prefix '10_Warped/Warped_' ptno '_' Descrip_UID '.nii.gz '...
-    '-s ' script04_prefix mask_title '.nii.gz']) % 1.15 min
+    '-s ' script04_prefix ptno_site_mask '.nii.gz']) % 1.15 min
 system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
     '-g ' script02_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz '...
-    '-s ' script04_prefix mask_title '_Resample.nii.gz']) % 1.15 min
+    '-s ' script04_prefix ptno_site_mask '_Resample.nii.gz']) % 1.15 min
 
 % DSC/DCE
 temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies_all(ii).StudyInstanceUID ''' '...
@@ -1054,15 +1103,15 @@ Descrip = strrep(strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescri
 Descrip_UID = sprintf([ Descrip '_' UID]); % patient #, Descrip, SeriesInstanceUID
 system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
     '-g ' script03_prefix '10_Warped/Warped_' ptno '_' Descrip_UID '.nii.gz '...
-    '-s ' script04_prefix mask_title '.nii.gz']) % 1.15 min
+    '-s ' script04_prefix ptno_site_mask '.nii.gz']) % 1.15 min
 
 system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
     '-g ' script03_prefix '10_Warped/Warped_' ptno '_' Descrip '_lasttimept_' UID '.nii.gz '...
-    '-s ' script04_prefix mask_title '.nii.gz']) % 1.15 min
+    '-s ' script04_prefix ptno_site_mask '.nii.gz']) % 1.15 min
 
 system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
     '-g ' script03_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz '...
-    '-s ' script04_prefix mask_title '_Resample.nii.gz']) % 1.15 min
+    '-s ' script04_prefix ptno_site_mask '_Resample.nii.gz']) % 1.15 min
 
 
 

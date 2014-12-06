@@ -103,183 +103,7 @@ n_T2FLAIR = size(series_T2FLAIR,1);
 
 
 %% Histogram Match for the 1st set
-%%%%%%%%%%%%%%%% 1. Perform Histogram Match for SWAN   %%%%%%%%%%%%%%
-fid = fopen([script01_prefix 'SWAN.makefile'],'w');
-fprintf(fid, 'all:');
-for ii=1:n_SWAN 
-    fprintf(fid, [' job' num2str(ii)]);
-end
-fprintf(fid, '\nANTSPATH=/opt/apps/ANTsR/dev//ANTsR_src/ANTsR/src/ANTS/ANTS-build//bin\n');
-
-
-zz=1; % Counter for every single job - combine into 1 long file?
-for ii=1:n_SWAN 
-    UID = series_SWAN(ii).SeriesInstanceUID;
-    Descrip = strrep(strrep(strrep(strrep(strrep(series_SWAN(ii).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-    ptno_Descrip_UID = sprintf(['%02d_' Descrip '_' UID],ii); %
-    fprintf(fid,['\n\njob' num2str(ii) ':\n']);
-    
-%%%%%%%%%%%%%%%%%%%%%% N4, Brain Extract, Truncation, HistMatch
-    % 1. N4 Bias Field Correction
-    fprintf(fid,['\t$(ANTSPATH)/N4BiasFieldCorrection -d 3 '...
-		'-i ' script01_prefix '00_radpath_raw/radpath_raw_' ptno_Descrip_UID '.nii.gz -s 4 -c [50x50x50x50,1e-7] -b [200] '...
-		'-o ' script01_prefix '01_N4/Brain_N4_' ptno_Descrip_UID '.nii.gz\n']);
-
-    % 2. Create Mask and Extract Brain
-    % 2a. Perform rough down-sampled registration as beginning step to help initialize later registration
-    fprintf(fid,['\t$(ANTSPATH)/ResampleImageBySpacing 3 '...
- 		LPBA40_Template_location ' '...
-		script01_prefix '02_RInput/Affine_Fixed_LPBA40.nii.gz 4 4 4 1\n']);
-    fprintf(fid,['\t$(ANTSPATH)/ResampleImageBySpacing 3 '...
-		script01_prefix '01_N4/Brain_N4_' ptno_Descrip_UID '.nii.gz '...
-		script01_prefix '02_RInput/Affine_Moving_' ptno_Descrip_UID '.nii.gz 4 4 4 1\n']);
-    fprintf(fid,['\t$(ANTSPATH)/antsAffineInitializer 3 '...
-		script01_prefix '02_RInput/Affine_Fixed_LPBA40.nii.gz '...
-		script01_prefix '02_RInput/Affine_Moving_' ptno_Descrip_UID '.nii.gz '...
-	    script01_prefix '02_RInput/InitialAffine_' ptno_Descrip_UID '.mat 15 0.1 0 10\n']);
-
-    % 2b. Create Laplacian (edge detection) version of images to assist in registration
-    fprintf(fid,['\t$(ANTSPATH)/ImageMath 3 '...
-		script01_prefix '02_RInput/Laplacian_' ptno_Descrip_UID '.nii.gz '...
-		'Laplacian '...
-		script01_prefix '01_N4/Brain_N4_' ptno_Descrip_UID '.nii.gz 1.5 1\n']);
-    fprintf(fid,['\t$(ANTSPATH)/ImageMath 3 '...
-		script01_prefix '02_RInput/Laplacian_LPBA40.nii.gz '...
-		'Laplacian '...
-		 LPBA40_Template_location ' 1.5 1\n']);
-
-    % 2c. Perform registration of image to template
-    fprintf(fid,['\t$(ANTSPATH)/antsRegistration -d 3 -u 1 -w [0.025, 0.975] '...
-	   '-o ' script01_prefix '03_ROutput/RegistrationOutput_' ptno_Descrip_UID '_ '...
-	   '-r ' script01_prefix '02_RInput/InitialAffine_' ptno_Descrip_UID '.mat -z 1 --float 0 '...
-        '-m MI[' LPBA40_Template_location ','...
-	      script01_prefix '01_N4/Brain_N4_' ptno_Descrip_UID '.nii.gz,1,32,Regular,0.25] -c [1000x500x250x100,1e-8,10] -t Rigid[0.1] -f 8x4x2x1 -s 4x2x1x0 '...
-        '-m MI[' LPBA40_Template_location ','...
-	      script01_prefix '01_N4/Brain_N4_' ptno_Descrip_UID '.nii.gz,1,32,Regular,0.25] -c [1000x500x250x100,1e-8,10] -t Affine[0.1] -f 8x4x2x1 -s 4x2x1x0 '...
-        '-m CC[' LPBA40_Template_location ','...
-	      script01_prefix '01_N4/Brain_N4_' ptno_Descrip_UID '.nii.gz,0.5,4] '...
-        '-m CC[02_RInput/Laplacian_LPBA40.nii.gz,'...
-	      script01_prefix '02_RInput/Laplacian_' ptno_Descrip_UID '.nii.gz,0.5,4] -c [50x10x0,1e-9,15] -t SyN[0.1,3,0] -f 4x2x1 -s 2x1x0\n']);
-
-    % 2d. Apply registration to mask
-    fprintf(fid,['\t$(ANTSPATH)/antsApplyTransforms -d 3 '...
-		'-i ' LPBA40_mask_location ' '...
-		'-o ' script01_prefix '04_Masks/Mask_' ptno_Descrip_UID '.nii.gz '...
-		'-r ' script01_prefix '01_N4/Brain_N4_' ptno_Descrip_UID '.nii.gz -n Gaussian '...
-        '-t [' script01_prefix '03_ROutput/RegistrationOutput_' ptno_Descrip_UID '_0GenericAffine.mat,1] '...
-		'-t ' script01_prefix '03_ROutput/RegistrationOutput_' ptno_Descrip_UID '_1InverseWarp.nii.gz --float 0\n']);
-
-    % 2e. Treshold and Get largest component of mask. 
-    fprintf(fid,['\t$(ANTSPATH)/ThresholdImage 3 '...
-		script01_prefix '04_Masks/Mask_' ptno_Descrip_UID '.nii.gz '...
-		script01_prefix '04_Masks/Mask_thresholded_' ptno_Descrip_UID '.nii.gz 0.5 1 1 0\n']); % Threshold Mask
-    fprintf(fid,['\t$(ANTSPATH)/ImageMath 3 '...
-		script01_prefix '04_Masks/Mask_LC_' ptno_Descrip_UID '.nii.gz '...
-		'GetLargestComponent '...
-		script01_prefix '04_Masks/Mask_thresholded_' ptno_Descrip_UID '.nii.gz\n']); % Get largest component of mask 
-
-    fprintf(fid,['\t$(ANTSPATH)/ImageMath 3 '...
-		script01_prefix '04_Masks/Mask_MD_' ptno_Descrip_UID '.nii.gz '...
-		'MD '...
-		script01_prefix '04_Masks/Mask_LC_' ptno_Descrip_UID '.nii.gz 5\n']); % Dilate mask
-    fprintf(fid,['\t$(ANTSPATH)/ImageMath 3 '...
-		script01_prefix '04_Masks/Mask_MC_' ptno_Descrip_UID '.nii.gz '...
-		'MC '...
-		script01_prefix '04_Masks/Mask_MD_' ptno_Descrip_UID '.nii.gz 4\n']); % Close mask
-    
-    % 2f. Perform Atropos segmentation to get WM, GM, and CSF. Combine these masks.
-    fprintf(fid,['\t$(ANTSPATH)/Atropos -d 3 '...
-		'-o ' script01_prefix '04_Masks/Atropos_Mask_' ptno_Descrip_UID '.nii.gz '...
-		'-a ' script01_prefix '01_N4/Brain_N4_' ptno_Descrip_UID '.nii.gz '...
-		'-x ' script01_prefix '04_Masks/Mask_MC_' ptno_Descrip_UID '.nii.gz '...
-        	'-i kmeans[3] -c [3, 0.0] -m [0.1, 1x1x1] -k Gaussian\n']);
-
-    % 2g. Separate WM, GM, CSF masks
-    fprintf(fid,['\t$(ANTSPATH)/ThresholdImage 3 '...
-		script01_prefix '04_Masks/Atropos_Mask_' ptno_Descrip_UID '.nii.gz '...
-		script01_prefix '04_Masks/Atropos_WM_' ptno_Descrip_UID '.nii.gz 3 3 1 0\n']);
-    fprintf(fid,['\t$(ANTSPATH)/ThresholdImage 3 '...
-		script01_prefix '04_Masks/Atropos_Mask_' ptno_Descrip_UID '.nii.gz '...
-		script01_prefix '04_Masks/Atropos_GM_' ptno_Descrip_UID '.nii.gz 2 2 1 0\n']);
-    fprintf(fid,['\t$(ANTSPATH)/ThresholdImage 3 '...
-		script01_prefix '04_Masks/Atropos_Mask_' ptno_Descrip_UID '.nii.gz '...
-		script01_prefix '04_Masks/Atropos_CSF_' ptno_Descrip_UID '.nii.gz 1 1 1 0\n']);
-
-    % 2h. Combine WM, GM, CSF masks into 1
-    fprintf(fid,['\t$(ANTSPATH)/ImageMath 3 '...
-		script01_prefix '04_Masks/Atropos_WM_GM_' ptno_Descrip_UID '.nii.gz '...
-		'addtozero '...
-		script01_prefix '04_Masks/Atropos_WM_' ptno_Descrip_UID '.nii.gz '...
-		script01_prefix '04_Masks/Atropos_GM_' ptno_Descrip_UID '.nii.gz\n']);
-    fprintf(fid,['\t$(ANTSPATH)/ImageMath 3 '...
-		script01_prefix '04_Masks/Atropos_WM_GM_CSF_' ptno_Descrip_UID '.nii.gz '...
-		'addtozero '...
-		script01_prefix '04_Masks/Atropos_WM_GM_' ptno_Descrip_UID '.nii.gz '...
-		script01_prefix '04_Masks/Atropos_CSF_' ptno_Descrip_UID '.nii.gz\n']);
-    fprintf(fid,['\t$(ANTSPATH)/ImageMath 3 '...
-		script01_prefix '04_Masks/Atropos_LC_' ptno_Descrip_UID '.nii.gz '...
-		'GetLargestComponent '...
-		script01_prefix '04_Masks/Atropos_WM_GM_CSF_' ptno_Descrip_UID '.nii.gz\n']);
-    
-    % 2i. Extract Brain
-    fprintf(fid,['\t$(ANTSPATH)/MultiplyImages 3 '...
-		script01_prefix '04_Masks/Atropos_LC_' ptno_Descrip_UID '.nii.gz '...
-		script01_prefix '01_N4/Brain_N4_' ptno_Descrip_UID '.nii.gz '...
-		script01_prefix '05_Brain_Only/Brain_' ptno_Descrip_UID '.nii.gz\n']);
-
-    % 3. Intensity Truncation
-    fprintf(fid,['\t$(ANTSPATH)/ImageMath 3 '...
-		script01_prefix '06_Truncated/Brain_Truncated0_' ptno_Descrip_UID '.nii.gz '...
-		'TruncateImageIntensity '...
-		script01_prefix '05_Brain_Only/Brain_' ptno_Descrip_UID '.nii.gz 0.01 0.999 256\n']);
-end
-fclose(fid);
-system(['make -j 8 -f ' script01_prefix 'SWAN.makefile'])
-
-
-% Create cumulative histogram
-for ii=1:n_SWAN
-    UID = series_SWAN(ii).SeriesInstanceUID;
-    Descrip = strrep(strrep(strrep(strrep(strrep(series_SWAN(ii).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-    ptno_Descrip_UID = sprintf(['%02d_' Descrip '_' UID],ii); %
-    
-    % 3a. Create cumulative histogram
-    if ii==1 % For 1st SWAN image, initialize the SWAN_cume variable
-        SWAN_cume = load_nii([script01_prefix '06_Truncated/Brain_Truncated0_' ptno_Descrip_UID '.nii.gz']);
-        SWAN_cume.img = reshape(SWAN_cume.img,1,[]);
-    else
-        SWAN_temp = load_nii([script01_prefix '06_Truncated/Brain_Truncated0_' ptno_Descrip_UID '.nii.gz']);
-        SWAN_cume.img = [SWAN_cume.img reshape(SWAN_temp.img,1,[])];
-    end
-end
-save_nii(SWAN_cume, [script01_prefix 'SWAN_cume.nii.gz'])
-clear SWAN_cume SWAN_temp
-
-% 3b. Histogram Match
-fid = fopen([script01_prefix 'SWAN_HistMatch.makefile'],'w');
-fprintf(fid, 'all:');
-for ii=1:n_SWAN 
-    fprintf(fid, [' job' num2str(ii)]);
-end
-fprintf(fid, '\nANTSPATH=/opt/apps/ANTsR/dev//ANTsR_src/ANTsR/src/ANTS/ANTS-build//bin\n');
-for ii=1:n_SWAN 
-    UID = series_SWAN(ii).SeriesInstanceUID;
-    Descrip = strrep(strrep(strrep(strrep(strrep(series_SWAN(ii).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-    ptno_Descrip_UID = sprintf(['%02d_' Descrip '_' UID],ii); %
-    fprintf(fid,['\n\njob' num2str(ii) ':\n']);
-    fprintf(fid,['\t$(ANTSPATH)/ImageMath 3 '...
-        script01_prefix '07_HistMatch/Brain_HistMatch_' ptno_Descrip_UID '.nii.gz '...
-        'HistogramMatch '...
-        script01_prefix '06_Truncated/Brain_Truncated0_' ptno_Descrip_UID '.nii.gz '...
-        script01_prefix 'SWAN_cume.nii.gz 255 64']);
-end
-fclose(fid);
-system(['make -j 8 -f SWAN_HistMatch.makefile'])
-
-
-
-%%
-%%%%%%%%%%%%%%%%%%%%%% 2.Repeat for T1 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%% 1.Repeat for T1 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 fid = fopen('T1.makefile','w');
 fprintf(fid, 'all:');
@@ -439,6 +263,15 @@ for ii=1:n_T1
     
     
 end
+imgsize_factors = factor(numel(T1_cume.img));
+n3 = numel(imgsize_factors);
+n1 = round(n3*1/3);
+n2 = round(n3*2/3);
+cume_dim1 = prod(imgsize_factors(1:n1));
+cume_dim2 = prod(imgsize_factors(n1+1:n2));
+cume_dim3 = prod(imgsize_factors(n2+1:n3));
+T1_cume.hdr.dime.dim = [3 cume_dim1 cume_dim2 cume_dim3 1 1 1 1];
+T1_cume.img = reshape(T1_cume.img,cume_dim1,cume_dim2,cume_dim3);
 save_nii(T1_cume, 'T1_cume.nii.gz')
 clear T1_cume T1_temp
 
@@ -469,7 +302,7 @@ system(['make -j 8 -f T1_HistMatch.makefile'])
 
 
 %%
-%%%%%%%%%%%%%%%%%%%%%% 3.Repeat for T1post %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%% 2.Repeat for T1post %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 fid = fopen('T1post.makefile','w');
 fprintf(fid, 'all:');
@@ -627,6 +460,15 @@ for ii=1:n_T1post
         T1post_cume.img = [T1post_cume.img reshape(T1post_temp.img,1,[])];
     end
 end
+imgsize_factors = factor(numel(T1post_cume.img));
+n3 = numel(imgsize_factors);
+n1 = round(n3*1/3);
+n2 = round(n3*2/3);
+cume_dim1 = prod(imgsize_factors(1:n1));
+cume_dim2 = prod(imgsize_factors(n1+1:n2));
+cume_dim3 = prod(imgsize_factors(n2+1:n3));
+T1post_cume.hdr.dime.dim = [3 cume_dim1 cume_dim2 cume_dim3 1 1 1 1];
+T1post_cume.img = reshape(T1post_cume.img,cume_dim1,cume_dim2,cume_dim3);
 save_nii(T1post_cume, 'T1post_cume.nii.gz')
 clear T1post_cume T1post_temp
 
@@ -654,7 +496,7 @@ system(['make -j 8 -f T1post_HistMatch.makefile'])
 
 
 %%
-%%%%%%%%%%%%%%%%%%%%%% 4.Repeat for T2 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%% 3.Repeat for T2 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 fid = fopen('T2.makefile','w');
 fprintf(fid, 'all:');
@@ -816,6 +658,15 @@ for ii=1:n_T2
         T2_cume.img = [T2_cume.img reshape(T2_temp.img,1,[])];
     end
 end
+imgsize_factors = factor(numel(T2_cume.img));
+n3 = numel(imgsize_factors);
+n1 = round(n3*1/3);
+n2 = round(n3*2/3);
+cume_dim1 = prod(imgsize_factors(1:n1));
+cume_dim2 = prod(imgsize_factors(n1+1:n2));
+cume_dim3 = prod(imgsize_factors(n2+1:n3));
+T2_cume.hdr.dime.dim = [3 cume_dim1 cume_dim2 cume_dim3 1 1 1 1];
+T2_cume.img = reshape(T2_cume.img,cume_dim1,cume_dim2,cume_dim3);
 save_nii(T2_cume, 'T2_cume.nii.gz')
 clear T2_cume T2_temp
 
@@ -843,7 +694,7 @@ system(['make -j 8 -f T2_HistMatch.makefile'])
 
 
 %%
-%%%%%%%%%%%%%%%%%%%%%% 5.Repeat for T2star %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%% 4.Repeat for T2star %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 fid = fopen('T2star.makefile','w');
 fprintf(fid, 'all:');
@@ -1012,6 +863,15 @@ for ii=1:n_T2star
         T2star_cume.img = [T2star_cume.img reshape(T2star_temp.img,1,[])];
     end
 end
+imgsize_factors = factor(numel(T2star_cume.img));
+n3 = numel(imgsize_factors);
+n1 = round(n3*1/3);
+n2 = round(n3*2/3);
+cume_dim1 = prod(imgsize_factors(1:n1));
+cume_dim2 = prod(imgsize_factors(n1+1:n2));
+cume_dim3 = prod(imgsize_factors(n2+1:n3));
+T2star_cume.hdr.dime.dim = [3 cume_dim1 cume_dim2 cume_dim3 1 1 1 1];
+T2star_cume.img = reshape(T2star_cume.img,cume_dim1,cume_dim2,cume_dim3);
 save_nii(T2star_cume, 'T2star_cume.nii.gz')
 clear T2star_cume T2star_temp
 
@@ -1044,7 +904,7 @@ system(['make -j 8 -f T2star_HistMatch.makefile'])
 
 
 %%
-%%%%%%%%%%%%%%%%%%%%%% 6.Repeat for T2FLAIR %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%% 5.Repeat for T2FLAIR %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 fid = fopen('T2FLAIR.makefile','w');
 fprintf(fid, 'all:');
@@ -1205,6 +1065,15 @@ for ii=1:n_T2FLAIR
         T2FLAIR_cume.img = [T2FLAIR_cume.img reshape(T2FLAIR_temp.img,1,[])];
     end
 end
+imgsize_factors = factor(numel(T2FLAIR_cume.img));
+n3 = numel(imgsize_factors);
+n1 = round(n3*1/3);
+n2 = round(n3*2/3);
+cume_dim1 = prod(imgsize_factors(1:n1));
+cume_dim2 = prod(imgsize_factors(n1+1:n2));
+cume_dim3 = prod(imgsize_factors(n2+1:n3));
+T2FLAIR_cume.hdr.dime.dim = [3 cume_dim1 cume_dim2 cume_dim3 1 1 1 1];
+T2FLAIR_cume.img = reshape(T2FLAIR_cume.img,cume_dim1,cume_dim2,cume_dim3);
 save_nii(T2FLAIR_cume, 'T2FLAIR_cume.nii.gz')
 clear T2FLAIR_cume T2FLAIR_temp
 
@@ -1236,6 +1105,198 @@ time_min = time_s/60
 time_hrs = time_min/60 % 33 hours, next time use 5 cores?
 
 mksqlite('close' ) ;
+
+%%
+%%%%%%%%%%%%%%%% 6. Perform Histogram Match for SWAN   %%%%%%%%%%%%%%
+fid = fopen([script01_prefix 'SWAN.makefile'],'w');
+fprintf(fid, 'all:');
+for ii=1:n_SWAN 
+    fprintf(fid, [' job' num2str(ii)]);
+end
+fprintf(fid, '\nANTSPATH=/opt/apps/ANTsR/dev//ANTsR_src/ANTsR/src/ANTS/ANTS-build//bin\n');
+
+
+zz=1; % Counter for every single job - combine into 1 long file?
+for ii=1:n_SWAN 
+    UID = series_SWAN(ii).SeriesInstanceUID;
+    Descrip = strrep(strrep(strrep(strrep(strrep(series_SWAN(ii).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
+    ptno_Descrip_UID = sprintf(['%02d_' Descrip '_' UID],ii); %
+    fprintf(fid,['\n\njob' num2str(ii) ':\n']);
+    
+%%%%%%%%%%%%%%%%%%%%%% N4, Brain Extract, Truncation, HistMatch
+    % 1. N4 Bias Field Correction
+    fprintf(fid,['\t$(ANTSPATH)/N4BiasFieldCorrection -d 3 '...
+		'-i ' script01_prefix '00_radpath_raw/radpath_raw_' ptno_Descrip_UID '.nii.gz -s 4 -c [50x50x50x50,1e-7] -b [200] '...
+		'-o ' script01_prefix '01_N4/Brain_N4_' ptno_Descrip_UID '.nii.gz\n']);
+
+    % 2. Create Mask and Extract Brain
+    % 2a. Perform rough down-sampled registration as beginning step to help initialize later registration
+    fprintf(fid,['\t$(ANTSPATH)/ResampleImageBySpacing 3 '...
+ 		LPBA40_Template_location ' '...
+		script01_prefix '02_RInput/Affine_Fixed_LPBA40.nii.gz 4 4 4 1\n']);
+    fprintf(fid,['\t$(ANTSPATH)/ResampleImageBySpacing 3 '...
+		script01_prefix '01_N4/Brain_N4_' ptno_Descrip_UID '.nii.gz '...
+		script01_prefix '02_RInput/Affine_Moving_' ptno_Descrip_UID '.nii.gz 4 4 4 1\n']);
+    fprintf(fid,['\t$(ANTSPATH)/antsAffineInitializer 3 '...
+		script01_prefix '02_RInput/Affine_Fixed_LPBA40.nii.gz '...
+		script01_prefix '02_RInput/Affine_Moving_' ptno_Descrip_UID '.nii.gz '...
+	    script01_prefix '02_RInput/InitialAffine_' ptno_Descrip_UID '.mat 15 0.1 0 10\n']);
+
+    % 2b. Create Laplacian (edge detection) version of images to assist in registration
+    fprintf(fid,['\t$(ANTSPATH)/ImageMath 3 '...
+		script01_prefix '02_RInput/Laplacian_' ptno_Descrip_UID '.nii.gz '...
+		'Laplacian '...
+		script01_prefix '01_N4/Brain_N4_' ptno_Descrip_UID '.nii.gz 1.5 1\n']);
+    fprintf(fid,['\t$(ANTSPATH)/ImageMath 3 '...
+		script01_prefix '02_RInput/Laplacian_LPBA40.nii.gz '...
+		'Laplacian '...
+		 LPBA40_Template_location ' 1.5 1\n']);
+
+    % 2c. Perform registration of image to template
+    fprintf(fid,['\t$(ANTSPATH)/antsRegistration -d 3 -u 1 -w [0.025, 0.975] '...
+	   '-o ' script01_prefix '03_ROutput/RegistrationOutput_' ptno_Descrip_UID '_ '...
+	   '-r ' script01_prefix '02_RInput/InitialAffine_' ptno_Descrip_UID '.mat -z 1 --float 0 '...
+        '-m MI[' LPBA40_Template_location ','...
+	      script01_prefix '01_N4/Brain_N4_' ptno_Descrip_UID '.nii.gz,1,32,Regular,0.25] -c [1000x500x250x100,1e-8,10] -t Rigid[0.1] -f 8x4x2x1 -s 4x2x1x0 '...
+        '-m MI[' LPBA40_Template_location ','...
+	      script01_prefix '01_N4/Brain_N4_' ptno_Descrip_UID '.nii.gz,1,32,Regular,0.25] -c [1000x500x250x100,1e-8,10] -t Affine[0.1] -f 8x4x2x1 -s 4x2x1x0 '...
+        '-m CC[' LPBA40_Template_location ','...
+	      script01_prefix '01_N4/Brain_N4_' ptno_Descrip_UID '.nii.gz,0.5,4] '...
+        '-m CC[02_RInput/Laplacian_LPBA40.nii.gz,'...
+	      script01_prefix '02_RInput/Laplacian_' ptno_Descrip_UID '.nii.gz,0.5,4] -c [50x10x0,1e-9,15] -t SyN[0.1,3,0] -f 4x2x1 -s 2x1x0\n']);
+
+    % 2d. Apply registration to mask
+    fprintf(fid,['\t$(ANTSPATH)/antsApplyTransforms -d 3 '...
+		'-i ' LPBA40_mask_location ' '...
+		'-o ' script01_prefix '04_Masks/Mask_' ptno_Descrip_UID '.nii.gz '...
+		'-r ' script01_prefix '01_N4/Brain_N4_' ptno_Descrip_UID '.nii.gz -n Gaussian '...
+        '-t [' script01_prefix '03_ROutput/RegistrationOutput_' ptno_Descrip_UID '_0GenericAffine.mat,1] '...
+		'-t ' script01_prefix '03_ROutput/RegistrationOutput_' ptno_Descrip_UID '_1InverseWarp.nii.gz --float 0\n']);
+
+    % 2e. Treshold and Get largest component of mask. 
+    fprintf(fid,['\t$(ANTSPATH)/ThresholdImage 3 '...
+		script01_prefix '04_Masks/Mask_' ptno_Descrip_UID '.nii.gz '...
+		script01_prefix '04_Masks/Mask_thresholded_' ptno_Descrip_UID '.nii.gz 0.5 1 1 0\n']); % Threshold Mask
+    fprintf(fid,['\t$(ANTSPATH)/ImageMath 3 '...
+		script01_prefix '04_Masks/Mask_LC_' ptno_Descrip_UID '.nii.gz '...
+		'GetLargestComponent '...
+		script01_prefix '04_Masks/Mask_thresholded_' ptno_Descrip_UID '.nii.gz\n']); % Get largest component of mask 
+
+    fprintf(fid,['\t$(ANTSPATH)/ImageMath 3 '...
+		script01_prefix '04_Masks/Mask_MD_' ptno_Descrip_UID '.nii.gz '...
+		'MD '...
+		script01_prefix '04_Masks/Mask_LC_' ptno_Descrip_UID '.nii.gz 5\n']); % Dilate mask
+    fprintf(fid,['\t$(ANTSPATH)/ImageMath 3 '...
+		script01_prefix '04_Masks/Mask_MC_' ptno_Descrip_UID '.nii.gz '...
+		'MC '...
+		script01_prefix '04_Masks/Mask_MD_' ptno_Descrip_UID '.nii.gz 4\n']); % Close mask
+    
+    % 2f. Perform Atropos segmentation to get WM, GM, and CSF. Combine these masks.
+    fprintf(fid,['\t$(ANTSPATH)/Atropos -d 3 '...
+		'-o ' script01_prefix '04_Masks/Atropos_Mask_' ptno_Descrip_UID '.nii.gz '...
+		'-a ' script01_prefix '01_N4/Brain_N4_' ptno_Descrip_UID '.nii.gz '...
+		'-x ' script01_prefix '04_Masks/Mask_MC_' ptno_Descrip_UID '.nii.gz '...
+        	'-i kmeans[3] -c [3, 0.0] -m [0.1, 1x1x1] -k Gaussian\n']);
+
+    % 2g. Separate WM, GM, CSF masks
+    fprintf(fid,['\t$(ANTSPATH)/ThresholdImage 3 '...
+		script01_prefix '04_Masks/Atropos_Mask_' ptno_Descrip_UID '.nii.gz '...
+		script01_prefix '04_Masks/Atropos_WM_' ptno_Descrip_UID '.nii.gz 3 3 1 0\n']);
+    fprintf(fid,['\t$(ANTSPATH)/ThresholdImage 3 '...
+		script01_prefix '04_Masks/Atropos_Mask_' ptno_Descrip_UID '.nii.gz '...
+		script01_prefix '04_Masks/Atropos_GM_' ptno_Descrip_UID '.nii.gz 2 2 1 0\n']);
+    fprintf(fid,['\t$(ANTSPATH)/ThresholdImage 3 '...
+		script01_prefix '04_Masks/Atropos_Mask_' ptno_Descrip_UID '.nii.gz '...
+		script01_prefix '04_Masks/Atropos_CSF_' ptno_Descrip_UID '.nii.gz 1 1 1 0\n']);
+
+    % 2h. Combine WM, GM, CSF masks into 1
+    fprintf(fid,['\t$(ANTSPATH)/ImageMath 3 '...
+		script01_prefix '04_Masks/Atropos_WM_GM_' ptno_Descrip_UID '.nii.gz '...
+		'addtozero '...
+		script01_prefix '04_Masks/Atropos_WM_' ptno_Descrip_UID '.nii.gz '...
+		script01_prefix '04_Masks/Atropos_GM_' ptno_Descrip_UID '.nii.gz\n']);
+    fprintf(fid,['\t$(ANTSPATH)/ImageMath 3 '...
+		script01_prefix '04_Masks/Atropos_WM_GM_CSF_' ptno_Descrip_UID '.nii.gz '...
+		'addtozero '...
+		script01_prefix '04_Masks/Atropos_WM_GM_' ptno_Descrip_UID '.nii.gz '...
+		script01_prefix '04_Masks/Atropos_CSF_' ptno_Descrip_UID '.nii.gz\n']);
+    fprintf(fid,['\t$(ANTSPATH)/ImageMath 3 '...
+		script01_prefix '04_Masks/Atropos_LC_' ptno_Descrip_UID '.nii.gz '...
+		'GetLargestComponent '...
+		script01_prefix '04_Masks/Atropos_WM_GM_CSF_' ptno_Descrip_UID '.nii.gz\n']);
+    
+    % 2i. Extract Brain
+    fprintf(fid,['\t$(ANTSPATH)/MultiplyImages 3 '...
+		script01_prefix '04_Masks/Atropos_LC_' ptno_Descrip_UID '.nii.gz '...
+		script01_prefix '01_N4/Brain_N4_' ptno_Descrip_UID '.nii.gz '...
+		script01_prefix '05_Brain_Only/Brain_' ptno_Descrip_UID '.nii.gz\n']);
+
+    % 3. Intensity Truncation
+    fprintf(fid,['\t$(ANTSPATH)/ImageMath 3 '...
+		script01_prefix '06_Truncated/Brain_Truncated0_' ptno_Descrip_UID '.nii.gz '...
+		'TruncateImageIntensity '...
+		script01_prefix '05_Brain_Only/Brain_' ptno_Descrip_UID '.nii.gz 0.01 0.999 256\n']);
+end
+fclose(fid);
+system(['make -j 8 -f ' script01_prefix 'SWAN.makefile'])
+
+
+% Create cumulative histogram
+for ii=1:n_SWAN
+    UID = series_SWAN(ii).SeriesInstanceUID;
+    Descrip = strrep(strrep(strrep(strrep(strrep(series_SWAN(ii).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
+    ptno_Descrip_UID = sprintf(['%02d_' Descrip '_' UID],ii); %
+    
+    % 3a. Create cumulative histogram
+    if ii==1 % For 1st SWAN image, initialize the SWAN_cume variable
+        SWAN_cume = load_nii([script01_prefix '06_Truncated/Brain_Truncated0_' UID '.nii.gz']);
+        SWAN_cume.img = reshape(SWAN_cume.img,1,[]);
+    else
+        SWAN_temp = load_nii([script01_prefix '06_Truncated/Brain_Truncated0_' UID '.nii.gz']);
+        SWAN_cume.img = [SWAN_cume.img reshape(SWAN_temp.img,1,[])];
+    end
+end
+imgsize_factors = factor(numel(SWAN_cume.img));
+n3 = numel(imgsize_factors);
+n1 = round(n3*1/3);
+n2 = round(n3*2/3);
+cume_dim1 = prod(imgsize_factors(1:n1));
+cume_dim2 = prod(imgsize_factors(n1+1:n2));
+cume_dim3 = prod(imgsize_factors(n2+1:n3));
+SWAN_cume.hdr.dime.dim = [3 cume_dim1 cume_dim2 cume_dim3 1 1 1 1];
+SWAN_cume.img = reshape(SWAN_cume.img,cume_dim1,cume_dim2,cume_dim3);
+save_nii(SWAN_cume, [script01_prefix 'SWAN_cume.nii.gz'])
+clear SWAN_cume SWAN_temp
+
+% 3b. Histogram Match
+fid = fopen([script01_prefix 'SWAN_HistMatch.makefile'],'w');
+fprintf(fid, 'all:');
+for ii=1:n_SWAN 
+    fprintf(fid, [' job' num2str(ii)]);
+end
+fprintf(fid, '\nANTSPATH=/opt/apps/ANTsR/dev//ANTsR_src/ANTsR/src/ANTS/ANTS-build//bin\n');
+for ii=1:n_SWAN 
+    UID = series_SWAN(ii).SeriesInstanceUID;
+    Descrip = strrep(strrep(strrep(strrep(strrep(series_SWAN(ii).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
+    ptno_Descrip_UID = sprintf(['%02d_' Descrip '_' UID],ii); %
+    fprintf(fid,['\n\njob' num2str(ii) ':\n']);
+    fprintf(fid,['\t$(ANTSPATH)/ImageMath 3 '...
+        script01_prefix '07_HistMatch/Brain_HistMatch_' ptno_Descrip_UID '.nii.gz '...
+        'HistogramMatch '...
+        script01_prefix '06_Truncated/Brain_Truncated0_' ptno_Descrip_UID '.nii.gz '...
+        script01_prefix 'SWAN_cume.nii.gz 255 64']);
+end
+fclose(fid);
+system(['make -j 8 -f SWAN_HistMatch.makefile'])
+
+
+
+
+
+
+
+
+
 
 %% III. Register each image volume to reference for the same patient
 clear all
@@ -1374,60 +1435,73 @@ mksqlite('close' ) ;
 
 % Check results - make sure image volumes have no hiccups
 
-ii=4
-SWAN_SeriesInstanceUID = series_SWAN(ii).SeriesInstanceUID; % good, except #3
-SWAN_SeriesDescription = strrep(strrep(strrep(strrep(strrep(series_SWAN(ii).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-SWAN_file_infix = sprintf(['%02d_' SWAN_SeriesDescription '_' SWAN_SeriesInstanceUID],ii); %
+ii=2; % Patient #
+SWAN_UID = series_SWAN(ii).SeriesInstanceUID; % good, except #3
+SWAN_Descrip = strrep(strrep(strrep(strrep(strrep(series_SWAN(ii).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
+SWAN_ptno_Descrip_UID = sprintf(['%02d_' SWAN_Descrip '_' SWAN_UID],ii); %
     
-T1_SeriesInstanceUID = series_T1(ii).SeriesInstanceUID; % good
-T1_SeriesDescription = strrep(strrep(strrep(strrep(strrep(series_T1(ii).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-T1_file_infix = sprintf(['%02d_' T1_SeriesDescription '_' T1_SeriesInstanceUID],ii); %
+T1_UID = series_T1(ii).SeriesInstanceUID; % good
+T1_Descrip = strrep(strrep(strrep(strrep(strrep(series_T1(ii).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
+T1_ptno_Descrip_UID = sprintf(['%02d_' T1_Descrip '_' T1_UID],ii); %
 
-T1post_SeriesInstanceUID = series_T1post(ii).SeriesInstanceUID; % small - misses top vessel
-T1post_SeriesDescription = strrep(strrep(strrep(strrep(strrep(series_T1post(ii).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-T1post_file_infix = sprintf(['%02d_' T1post_SeriesDescription '_' T1post_SeriesInstanceUID],ii); %
+T1post_UID = series_T1post(ii).SeriesInstanceUID; % small - misses top vessel
+T1post_Descrip = strrep(strrep(strrep(strrep(strrep(series_T1post(ii).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
+T1post_ptno_Descrip_UID = sprintf(['%02d_' T1post_Descrip '_' T1post_UID],ii); %
 
-T2_SeriesInstanceUID = series_T2(ii).SeriesInstanceUID; % small - misses borders
-T2_SeriesDescription = strrep(strrep(strrep(strrep(strrep(series_T2(ii).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-T2_file_infix = sprintf(['%02d_' T2_SeriesDescription '_' T2_SeriesInstanceUID],ii); %
+T2_UID = series_T2(ii).SeriesInstanceUID; % small - misses borders
+T2_Descrip = strrep(strrep(strrep(strrep(strrep(series_T2(ii).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
+T2_ptno_Descrip_UID = sprintf(['%02d_' T2_Descrip '_' T2_UID],ii); %
 
-T2star_SeriesInstanceUID = series_T2star(ii).SeriesInstanceUID; % small -misses borders
-T2star_SeriesDescription = strrep(strrep(strrep(strrep(strrep(series_T2star(ii).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');   
-T2star_file_infix = sprintf(['%02d_' T2star_SeriesDescription '_' T2star_SeriesInstanceUID],ii); %
+T2star_UID = series_T2star(ii).SeriesInstanceUID; % small -misses borders
+T2star_Descrip = strrep(strrep(strrep(strrep(strrep(series_T2star(ii).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');   
+T2star_ptno_Descrip_UID = sprintf(['%02d_' T2star_Descrip '_' T2star_UID],ii); %
 
-T2FLAIR_SeriesInstanceUID = series_T2FLAIR(ii).SeriesInstanceUID; % good
-T2FLAIR_SeriesDescription = strrep(strrep(strrep(strrep(strrep(series_T2FLAIR(ii).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star'); 
-T2FLAIR_file_infix = sprintf(['%02d_' T2FLAIR_SeriesDescription '_' T2FLAIR_SeriesInstanceUID],ii); %
+T2FLAIR_UID = series_T2FLAIR(ii).SeriesInstanceUID; % good
+T2FLAIR_Descrip = strrep(strrep(strrep(strrep(strrep(series_T2FLAIR(ii).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star'); 
+T2FLAIR_ptno_Descrip_UID = sprintf(['%02d_' T2FLAIR_Descrip '_' T2FLAIR_UID],ii); %
+
+% 
+system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
+    '-g ' script01_prefix '00_radpath_raw/radpath_raw_' T2_UID '.nii.gz '])
+system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
+    '-g ' script01_prefix '00_radpath_raw/radpath_raw_' T2star_UID '.nii.gz '])
+system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
+    '-g ' script01_prefix '00_radpath_raw/radpath_raw_' T2FLAIR_UID '.nii.gz '])
+
+
+
+
+
 
 display('SWAN')
 system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-    '-g ' script01_prefix '01_N4/Brain_N4_' SWAN_SeriesInstanceUID '.nii.gz '...
-    '-s ' script01_prefix '04_Masks/Mask_largestcomponent_' SWAN_SeriesInstanceUID '.nii.gz'])
+    '-g ' script01_prefix '01_N4/Brain_N4_' SWAN_UID '.nii.gz '...
+    '-s ' script01_prefix '04_Masks/Mask_largestcomponent_' SWAN_UID '.nii.gz'])
 
 display('T1')
 system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-    '-g ' script01_prefix '01_N4/Brain_N4_' T1_SeriesInstanceUID '.nii.gz '...
-    '-s ' script01_prefix '04_Masks/Mask_largestcomponent_' T1_SeriesInstanceUID '.nii.gz'])
+    '-g ' script01_prefix '01_N4/Brain_N4_' T1_UID '.nii.gz '...
+    '-s ' script01_prefix '04_Masks/Mask_largestcomponent_' T1_UID '.nii.gz'])
 
 display('T1post')
 system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-    '-g ' script01_prefix '01_N4/Brain_N4_' T1post_SeriesInstanceUID '.nii.gz '...
-    '-s ' script01_prefix '04_Masks/Mask_largestcomponent_' T1post_SeriesInstanceUID '.nii.gz'])
+    '-g ' script01_prefix '01_N4/Brain_N4_' T1post_UID '.nii.gz '...
+    '-s ' script01_prefix '04_Masks/Mask_largestcomponent_' T1post_UID '.nii.gz'])
 
 display('T2')
 system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-    '-g ' script01_prefix '01_N4/Brain_N4_' T2_SeriesInstanceUID '.nii.gz '...
-    '-s ' script01_prefix '04_Masks/Mask_largestcomponent_' T2_SeriesInstanceUID '.nii.gz'])
+    '-g ' script01_prefix '01_N4/Brain_N4_' T2_UID '.nii.gz '...
+    '-s ' script01_prefix '04_Masks/Mask_largestcomponent_' T2_UID '.nii.gz'])
 
 display('T2star')
 system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-    '-g ' script01_prefix '01_N4/Brain_N4_' T2star_SeriesInstanceUID '.nii.gz '...
-    '-s ' script01_prefix '04_Masks/Mask_largestcomponent_' T2star_SeriesInstanceUID '.nii.gz'])
+    '-g ' script01_prefix '01_N4/Brain_N4_' T2star_UID '.nii.gz '...
+    '-s ' script01_prefix '04_Masks/Mask_largestcomponent_' T2star_UID '.nii.gz'])
 
 display('T2FLAIR')
 system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-    '-g ' script01_prefix '01_N4/Brain_N4_' T2FLAIR_SeriesInstanceUID '.nii.gz '...
-    '-s ' script01_prefix '04_Masks/Mask_largestcomponent_' T2FLAIR_SeriesInstanceUID '.nii.gz'])
+    '-g ' script01_prefix '01_N4/Brain_N4_' T2FLAIR_UID '.nii.gz '...
+    '-s ' script01_prefix '04_Masks/Mask_largestcomponent_' T2FLAIR_UID '.nii.gz'])
 
 
 system(['vglrun /opt/apps/SLICER/Slicer-4.3.1-linux-amd64/Slicer'])
@@ -1455,21 +1529,67 @@ temp_series = mksqlite(['select * from Series where StudyInstanceUID = ''' studi
     'or SeriesDescription like ''%SWAN%'') '...
     'order by SeriesDate ASC']); 
 
-jj=3;
+jj=1;
 UID = temp_series(jj).SeriesInstanceUID;
 Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
 system(['/opt/apps/ANTsR/dev//ANTsR_src/ANTsR/src/ANTS/ANTS-build//bin/'...
     'ImageMath 3 ' script01_prefix 'Diff_' Descrip '.nii.gz  - '...
     script01_prefix '00_radpath_raw/radpath_raw_' UID '.nii.gz '...
     script01_prefix '07_HistMatch/Brain_HistMatch_' UID '.nii.gz '])
-system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-    '-g ' script01_prefix 'Diff_' Descrip '.nii.gz '])
 
 system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
     '-g ' script01_prefix '00_radpath_raw/radpath_raw_' UID '.nii.gz '])
 system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
     '-g ' script01_prefix '07_HistMatch/Brain_HistMatch_' UID '.nii.gz '])
+system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
+    '-g ' script01_prefix 'Diff_' Descrip '.nii.gz '])
 
+
+% Generate histogram 1
+img = load_nii([script01_prefix '00_radpath_raw/radpath_raw_' UID '.nii.gz']); 
+img_values = double(img.img(img.img(:)>0));
+img_mean = mean(img_values,1);
+img_std = std(img_values,0,1);
+h = figure;
+hist(img_values)
+title([ Descrip ', mean = ' num2str(img_mean) ' +/- ' num2str(img_std)])
+saveas(h, [script01 '_Histogram_' Descrip ],'png')
+
+% Generate histogram 2
+img = load_nii([script01_prefix '07_HistMatch/Brain_HistMatch_' UID '.nii.gz']); 
+img_values = double(img.img(img.img(:)>0));
+img_mean = mean(img_values,1);
+img_std = std(img_values,0,1);
+h = figure;
+hist(img_values)
+title([ Descrip ', mean = ' num2str(img_mean) ' +/- ' num2str(img_std)])
+saveas(h, [script01 '_Histogram_' Descrip ],'png')
+
+% Cumulative Histogram
+% Descrip_cume = 'T1_cume';
+% Descrip_cume = 'T1post_cume';
+% Descrip_cume = 'T2_cume';
+% Descrip_cume = 'T2star_cume';
+% Descrip_cume = 'T2FLAIR_cume';
+% Descrip_cume = 'SWAN_cume';
+img = load_nii([script01_prefix Descrip_cume '.nii.gz']); 
+img_values = double(img.img(img.img(:)>0));
+img_mean = mean(img_values,1);
+img_std = std(img_values,0,1);
+h = figure;
+hist(img_values)
+title([ temp_series(jj).SeriesDescription ', mean = ' num2str(img_mean) ' +/- ' num2str(img_std)])
+saveas(h, [script01 'Histogram_' Descrip_cume ],'png')
+
+    
+% Get histogram of cumulative one as well
+
+
+
+
+
+
+% For pix of examples of metadata stored in SQL databse
 studies_1 = studies_all(1);
 series_1 = series_all(1);
 images_all = mksqlite(['select * from Images where SeriesInstanceUID = ''' UID ''' ']); 
