@@ -3,6 +3,7 @@ clear all
 close all
 path(path, '/mnt/data/scratch/igilab/jslin1/Matlab_add-ons/mksqlite-1.14')
 path(path, '/mnt/data/scratch/igilab/jslin1/Matlab_add-ons/NIfTI_20140122')
+path(path, '/mnt/data/scratch/igilab/jslin1/RadPath/Functions')
 script01_prefix = 'Script01_T1_T2_SWAN/';
 script02_prefix = 'Script02_DWI_DTI/';
 script03_prefix = 'Script03_DCE_DSC/';
@@ -271,17 +272,25 @@ UID = temp_series.SeriesInstanceUID; % good
 Descrip = strrep(strrep(strrep(strrep(strrep(temp_series.SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
 Descrip_UID = sprintf([ Descrip '_' UID]); % patient #, Descrip, SeriesInstanceUID
 
+
+for rez = 1 % rez 1 Original, 2 Resampled
 % Resample at high rez
-file = load_nii([script01_prefix '07_HistMatch/Brain_HistMatch_' UID '.nii.gz']);
-file = load_nii([script01_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']);
+
+if rez==1
+    file = load_nii([script01_prefix '07_HistMatch/Brain_HistMatch_' UID '.nii.gz']);
+elseif rez==2
+    file = load_nii([script01_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']);
+end
+
 imgdim = [file.hdr.dime.dim(2:4)]; % # pixels - ijk
 srow_x = file.hdr.hist.srow_x; % [ITK k] % xyz --> kij
 srow_y = file.hdr.hist.srow_y; % [ITK i]
 srow_z = file.hdr.hist.srow_z; % [ITK j]
 mask = zeros(imgdim);
 
-choice = 2; % cylinder = 1, sphere = 2
-if choice == 1
+choice = 1; % cylinder = 1, Forceps = 2
+if choice == 1 % Cylinder
+    mask_cyl = mask;
     tt_ctr_limit = 4.5; % height/2 = 9/2 = 4.5 mm
     step = 0.01; % mm
     for tt_ctr  = -tt_ctr_limit:step:tt_ctr_limit % inch along cylinder
@@ -291,11 +300,13 @@ if choice == 1
         b = ctr_point(2);
         c = ctr_point(3);
 
-        u = ctr_vector_unit(1); % center vector
+        % Central axis vector
+        u = ctr_vector_unit(1); 
         v = ctr_vector_unit(2);
         w = ctr_vector_unit(3);
 
-        x = 1; % Perp vector = [1 1 -(A+B)/C]
+	% Perpendicular vector = [1 1 -(A+B)/C]
+        x = 1; 
         y = 1;
         z = -(u + v)/w;
 
@@ -321,14 +332,45 @@ if choice == 1
             k = double(round(1 + (-x_new - srow_x(4))/srow_x(3))); % ITK k
             i = double(round(1 + (-y_new - srow_y(4))/srow_y(1))); % ITK i
             j = double(round(1 + (z_new - srow_z(4))/srow_z(2))); % ITK j
-            idx_cyl = sub2ind(size(mask),i,j,k);
-            mask(idx_cyl)=1; % for close voxels, mask = 1
+            idx_cyl = sub2ind(size(mask_cyl),i,j,k);
+            mask_cyl(idx_cyl)=1; % for close voxels, mask = 1
+
         end % inching along edge vector
     end % inch along center line
-    ptno_site_mask_shape = [ptno_site_mask '_Cyl'];
-elseif choice == 2 % Sphere
-      
-    % imgdim = [5 4 2];
+
+    holder_cyl = make_nii(mask,... % Image
+        [file.hdr.dime.pixdim(2:4)], ... % Pixel dimensions - ijk
+        [srow_x(4) srow_y(4) srow_z(4)],... % origin - xyz
+        64,[ptno_site_mask '_Cylinder']); % datatype: 64 = float64 = double, Description
+    holder_cyl.hdr = file.hdr;
+
+elseif choice == 2 % Forceps
+    mask_forceps = mask;
+    [j_all i_all k_all] = meshgrid(1:imgdim(2),1:imgdim(1),1:imgdim(3));
+    
+    % IJK coordinates --> XYZ
+    x_all = -((srow_x(1)*(i_all-1)) + (srow_x(2)*(j_all-1)) + (srow_x(3)*(k_all-1)) + srow_x(4));
+    y_all = -((srow_y(1)*(i_all-1)) + (srow_y(2)*(j_all-1)) + (srow_y(3)*(k_all-1)) + srow_y(4));
+    z_all = (srow_z(1)*(i_all-1)) + (srow_z(2)*(j_all-1)) + (srow_z(3)*(k_all-1)) + srow_z(4);
+    
+    % Calculate XYZ coordinates, check if < 5mm distance from start_point
+    x_diff = x_all - start_point(1);
+    y_diff = y_all - start_point(2);
+    z_diff = z_all - start_point(3);
+    xyz_dist = sqrt(x_diff.^2+y_diff.^2+z_diff.^2);   
+    idx_forceps = find(xyz_dist(:) < .5); % .5 mm radius, 1 mm diameter
+    mask_forceps(idx_sphere)=1; % for close voxels, mask = 1
+
+    holder_forceps = make_nii(mask,... % Image
+        [file.hdr.dime.pixdim(2:4)], ... % Pixel dimensions - ijk
+        [srow_x(4) srow_y(4) srow_z(4)],... % origin - xyz
+        64,[ptno_site_mask '_Forceps']); % datatype: 64 = float64 = double, Description
+    holder_forceps.hdr = file.hdr;
+    
+end
+
+    % Sphere - performed in every case
+    mask_sphere = mask;
     [j_all i_all k_all] = meshgrid(1:imgdim(2),1:imgdim(1),1:imgdim(3));
     
     % IJK coordinates --> XYZ
@@ -342,20 +384,52 @@ elseif choice == 2 % Sphere
     z_diff = z_all - start_point(3);
     xyz_dist = sqrt(x_diff.^2+y_diff.^2+z_diff.^2);   
     idx_sphere = find(xyz_dist(:) < 2.5); % 2.5 mm radius, 5 mm diameter
-    mask(idx_sphere)=1; % for close voxels, mask = 1
-    ptno_site_mask_shape = [ptno_site_mask '_Sphere'];
-end
+    mask_sphere(idx_sphere)=1; % for close voxels, mask = 1
+    
+    holder_sphere = make_nii(mask,... % Image
+        [file.hdr.dime.pixdim(2:4)], ... % Pixel dimensions - ijk
+        [srow_x(4) srow_y(4) srow_z(4)],... % origin - xyz
+        64,[ptno_site_mask '_Sphere']); % datatype: 64 = float64 = double, Description
+    holder_sphere.hdr = file.hdr; % Valid bc I commented out the x_form_nii command in load_nii,which changed qform/sform and applied a transform to the data
+
+    % Commented out the hdr qform, sform assignments in save_nii_hdr so it would stop being annoying
+    script04_prefix_results = [script04_prefix 'Results/' ptno '/' ptno_site '/'];
+    if ~isdir(script04_prefix_results)
+        mkdir(script04_prefix_results)
+    end
+
+    if choice==1 && rez==1 % Cylinder/Sphere, Original Rez
+        save_nii(holder_cyl, [script04_prefix_results ptno_site_mask '_Cyl_Original.nii.gz']) % 2.15 min - Commented out the hdr qform, sform
+        save_nii(holder_sphere, [script04_prefix_results ptno_site_mask '_Sphere_Original.nii.gz']) % 2.15 min - Commented out the hdr qform, sform
+    elseif choice==1 && rez==2 % Cylinder/Sphere, Resampled Rez
+        save_nii(holder_cyl, [script04_prefix_results ptno_site_mask '_Cyl_Resample.nii.gz']) 
+        save_nii(holder_sphere, [script04_prefix_results ptno_site_mask '_Sphere_Resample.nii.gz']) 
+    elseif choice==2 && rez==1 % Forceps/Sphere, Original Rez
+        save_nii(holder_forceps, [script04_prefix_results ptno_site_mask '_Forceps_Original.nii.gz']) 
+        save_nii(holder_sphere, [script04_prefix_results ptno_site_mask '_Sphere_Original.nii.gz']) 
+    elseif choice==2 && rez==2 % Forceps/Sphere, Resampled Rez
+        save_nii(holder_forceps, [script04_prefix_results ptno_site_mask '_Forceps_Resample.nii.gz']) 
+        save_nii(holder_sphere, [script04_prefix_results ptno_site_mask '_Sphere_Resample.nii.gz']) 
+    end
 
 
+end % Perform at rez = 1 (Original), then rez = 2 (Resampled)
 
+    %%
+    system(['vglrun /opt/apps/itksnap/itksnap-3.2.0-20141023-Linux-x86_64/bin/itksnap '...
+        '-g ' script04_prefix ptno_site_mask '_Cyl.nii.gz']) % 1.15 min
+    system(['vglrun /opt/apps/itksnap/itksnap-3.2.0-20141023-Linux-x86_64/bin/itksnap '...
+        '-g ' file.fileprefix '.nii.gz '...
+        '-s ' script04_prefix ptno_site_mask '_Cyl.nii.gz']) % 1.15 min
+    
+    system(['vglrun /opt/apps/itksnap/itksnap-3.2.0-20141023-Linux-x86_64/bin/itksnap '...
+        '-g ' script04_prefix_results ptno_site_mask '_Sphere.nii.gz']) % 1.15 min
+    system(['vglrun /opt/apps/itksnap/itksnap-3.2.0-20141023-Linux-x86_64/bin/itksnap '...
+        '-g ' file.fileprefix '.nii.gz '...
+        '-s ' script04_prefix_results ptno_site_mask '_Sphere.nii.gz']) % 1.15 min
 
-
-
-
-
-
-%%
 close all
+% Verified same coordinates in Matlab and ITKsnap format - 20141105
 
 for qq = 291%[260 280 305 313 340] %coronal - 315:5:365
     figure; imagesc(squeeze(file.img(qq,:,:))); colormap gray; axis off; title(num2str(qq))
@@ -375,94 +449,50 @@ for ee = 93%[290 300 313 330 350]% sagittal - 265:5:290
 %     figure; imagesc(squeeze(img_x_mask_resample.img(:,:,ee))); colormap gray; axis off; title(num2str(ee))
 end
 
-%
-holder = make_nii(mask,... % Image
-    [file.hdr.dime.pixdim(2:4)], ... % Pixel dimensions - ijk
-    [srow_x(4) srow_y(4) srow_z(4)],... % origin - xyz
-    64,ptno_site_mask_shape); % datatype: 64 = float64 = double, Description
-holder.hdr = file.hdr; % Valid bc I commented out the x_form_nii command in load_nii,which changed qform/sform and applied a transform to the data
-% holder.hdr.hist
-% holder.hdr.dime
 
-% Commented out the hdr qform, sform assignments in save_nii_hdr so it would
-% stop being annoying
-% Resampled
-script04_prefix_results = [script04_prefix 'Results/' ptno '/' ptno_site '/'];
-if ~isdir(script04_prefix_results)
-    mkdir(script04_prefix_results)
-end
-
-if choice == 1 % Cylinder
-    save_nii(holder, [script04_prefix_results ptno_site_mask '_Cyl_Resample.nii.gz']) % 2.15 min - Commented out the hdr qform, sform
-    system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-        '-g ' script04_prefix_results ptno_site_mask '_Cyl_Resample.nii.gz']) % 1.15 min
-    system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-        '-g ' script01_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz '...
-        '-s ' script04_prefix_results ptno_site_mask '_Cyl_Resample.nii.gz']) % 1.15 min
-
-    % Original size
-    save_nii(holder, [script04_prefix_results ptno_site_mask '_Cyl.nii.gz']) % 2.15 min - Commented out the hdr qform, sform
-    system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-        '-g ' script04_prefix ptno_site_mask '_Cyl.nii.gz']) % 1.15 min
-    system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-        '-g ' file.fileprefix '.nii.gz '...
-        '-s ' script04_prefix ptno_site_mask '_Cyl.nii.gz']) % 1.15 min
-elseif choice == 2 % Sphere
-    save_nii(holder, [script04_prefix_results ptno_site_mask '_Sphere_Resample.nii.gz']) % 2.15 min - Commented out the hdr qform, sform
-    system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-        '-g ' script04_prefix_results ptno_site_mask '_Sphere_Resample.nii.gz']) % 1.15 min
-    system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-        '-g ' script01_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz '...
-        '-s ' script04_prefix_results ptno_site_mask '_Sphere_Resample.nii.gz']) % 1.15 min
-
-    save_nii(holder, [script04_prefix_results ptno_site_mask '_Sphere.nii.gz']) % 2.15 min - Commented out the hdr qform, sform
-    system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-        '-g ' script04_prefix_results ptno_site_mask '_Sphere.nii.gz']) % 1.15 min
-    system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-        '-g ' file.fileprefix '.nii.gz '...
-        '-s ' script04_prefix_results ptno_site_mask '_Sphere.nii.gz']) % 1.15 min
-end
-
-
-
-
-% Verified same coordinates in Matlab and ITKsnap format - 20141105
 
 
 
 
 %% V. Use VOI mask to save mean, sd, histogram in .mat file
 
-mask_resample = load_nii([script04_prefix_results ptno_site_mask '_Cyl_Resample.nii.gz']); 
-mask_resample = load_nii([script04_prefix_results ptno_site_mask '_Sphere_Resample.nii.gz']); 
-voi_idx=find(mask_resample.img);
-script04_prefix_results = [script04_prefix 'Results/' ptno '/' ptno_site '/'];
-if ~isdir(script04_prefix_results)
-    mkdir(script04_prefix_results)
-end
 
 tic
-zz=1;
+for rez = 1:2
+
+    zz=1;
+    voi_cell1 = cell(1,9);
+    voi_cell2 = cell(1,9);
+
+    if rez == 1
+        if choice == 1
+            mask = load_nii([script04_prefix_results ptno_site_mask '_Cyl_Original.nii.gz']); 
+        elseif choice == 2
+            mask = load_nii([script04_prefix_results ptno_site_mask '_Forceps_Original.nii.gz']); 
+        end
+        mask_sphere = load_nii([script04_prefix_results ptno_site_mask '_Sphere_Original.nii.gz']); 
+    elseif rez == 2
+        if choice == 1
+            mask = load_nii([script04_prefix_results ptno_site_mask '_Cyl_Resample.nii.gz']); 
+        elseif choice == 2
+            mask = load_nii([script04_prefix_results ptno_site_mask '_Forceps_Resample.nii.gz']); 
+        end
+        mask_sphere = load_nii([script04_prefix_results ptno_site_mask '_Sphere_Resample.nii.gz']); 
+    end
+
+voi_idx1=find(mask.img);
+voi_idx2=find(mask_sphere.img);
+
+
+
 % T1
 temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies_all(ii).StudyInstanceUID ''' '...
     'and SeriesDescription like ''%T1%'' '... % Includes T1, T1post
     'and (SeriesDescription not like ''%STEALTH%'' '... %Excludes post
     'and SeriesDescription not like ''%+C%'') '... % Excludes post
     'order by SeriesNumber ASC']);
-UID = temp_series.SeriesInstanceUID;
-Descrip = strrep(strrep(strrep(strrep(strrep(temp_series.SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-Descrip_UID = sprintf([Descrip '_' UID]); % Descrip, SeriesInstanceUID
-img_resample = load_nii([script01_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-voi_values = img_resample.img(voi_idx);
-voi_mean = mean(voi_values,1);
-voi_std = std(voi_values,0,1);
-voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-h = figure;
-hist(voi_values)
-title([ ptno ' ' site ', ' temp_series.SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-close all
-zz=zz+1;
+VOI_output1(temp_series, rez, ptno, site, voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+zz = zz+1;
 
 % T1post
 temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies_all(ii).StudyInstanceUID ''' '...
@@ -470,20 +500,8 @@ temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies
     'and (SeriesDescription like ''%STEALTH%'' '... %Includes only post
     'or SeriesDescription like ''%+C%'') '... % Includes only post
     'order by SeriesNumber ASC']);
-UID = temp_series.SeriesInstanceUID;
-Descrip = strrep(strrep(strrep(strrep(strrep(temp_series.SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-Descrip_UID = sprintf([Descrip '_' UID]); % Descrip, SeriesInstanceUID
-img_resample = load_nii([script01_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-voi_values = img_resample.img(voi_idx);
-voi_mean = mean(voi_values,1);
-voi_std = std(voi_values,0,1);
-voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-h = figure;
-hist(voi_values)
-title([ ptno ' ' site ', ' temp_series.SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-close all
-zz=zz+1;
+VOI_output1(temp_series, rez, ptno, site, voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+zz = zz+1;
 
 % T2
 temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies_all(ii).StudyInstanceUID ''' '...
@@ -491,77 +509,29 @@ temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies
     'and SeriesDescription not like ''%*%'' '... % Includes T1, T1post
     'and SeriesDescription not like ''%FLAIR%'' '... % Includes T2, T2star, T2FLAIR
     'order by SeriesNumber ASC']);
-UID = temp_series.SeriesInstanceUID;
-Descrip = strrep(strrep(strrep(strrep(strrep(temp_series.SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-Descrip_UID = sprintf([Descrip '_' UID]); % Descrip, SeriesInstanceUID
-img_resample = load_nii([script01_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-voi_values = img_resample.img(voi_idx);
-voi_mean = mean(voi_values,1);
-voi_std = std(voi_values,0,1);
-voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-h = figure;
-hist(voi_values)
-title([ ptno ' ' site ', ' temp_series.SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-close all
-zz=zz+1;
+VOI_output1(temp_series, rez, ptno, site, voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+zz = zz+1;
 
 % T2star
 temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies_all(ii).StudyInstanceUID ''' '...
     'and SeriesDescription like ''%T2*%'' '... % Includes SWAN Image volume
     'order by SeriesNumber ASC']);
-UID = temp_series.SeriesInstanceUID;
-Descrip = strrep(strrep(strrep(strrep(strrep(temp_series.SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-Descrip_UID = sprintf([Descrip '_' UID]); % Descrip, SeriesInstanceUID
-img_resample = load_nii([script01_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-voi_values = img_resample.img(voi_idx);
-voi_mean = mean(voi_values,1);
-voi_std = std(voi_values,0,1);
-voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-h = figure;
-hist(voi_values)
-title([ ptno ' ' site ', ' temp_series.SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-close all
-zz=zz+1;
+VOI_output1(temp_series, rez, ptno, site, voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+zz = zz+1;
 
 % T2 FLAIR
 temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies_all(ii).StudyInstanceUID ''' '...
     'and SeriesDescription like ''%FLAIR%'' '... % Includes T2, T2star, T2FLAIR
     'order by SeriesNumber ASC']);
-UID = temp_series.SeriesInstanceUID;
-Descrip = strrep(strrep(strrep(strrep(strrep(temp_series.SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-Descrip_UID = sprintf([Descrip '_' UID]); % Descrip, SeriesInstanceUID
-img_resample = load_nii([script01_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-voi_values = img_resample.img(voi_idx);
-voi_mean = mean(voi_values,1);
-voi_std = std(voi_values,0,1);
-voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-h = figure;
-hist(voi_values)
-title([ ptno ' ' site ', ' temp_series.SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-close all
-zz=zz+1;
+VOI_output1(temp_series, rez, ptno, site, voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+zz = zz+1;
 
 % SWAN
 temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies_all(ii).StudyInstanceUID ''' '...
     'and SeriesDescription like ''%SWAN%'' '... % Includes SWAN Image volume
     'order by SeriesNumber ASC']);
-UID = temp_series.SeriesInstanceUID;
-Descrip = strrep(strrep(strrep(strrep(strrep(temp_series.SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-Descrip_UID = sprintf([Descrip '_' UID]); % Descrip, SeriesInstanceUID
-img_resample = load_nii([script01_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-voi_values = img_resample.img(voi_idx);
-voi_mean = mean(voi_values,1);
-voi_std = std(voi_values,0,1);
-voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-h = figure;
-hist(voi_values)
-title([ ptno ' ' site ', ' temp_series.SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-close all
-zz=zz+1;
+VOI_output1(temp_series, rez, ptno, site, voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+zz = zz+1;
 
 
 
@@ -573,103 +543,42 @@ temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies
         'and SeriesDescription like ''%Apparent Diffusion Coefficient%'' '... % Includes ADC and eADC from DWI
         'and SeriesDescription not like ''%Exponential%'' '... % Includes FA from DTI
         'order by SeriesNumber ASC']);
-UID = temp_series.SeriesInstanceUID;
-Descrip = strrep(strrep(strrep(strrep(strrep(temp_series.SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-Descrip_UID = sprintf([Descrip '_' UID]);
-img_resample = load_nii([script02_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-voi_values = img_resample.img(voi_idx)*conv_factor;
-voi_mean = mean(voi_values,1);
-voi_std = std(voi_values,0,1);
-voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-h = figure;
-hist(voi_values)
-title([ ptno ' ' site ', ' temp_series.SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-close all
-zz=zz+1;
-    
+VOI_output2(1e-6, temp_series, rez, ptno, site,  voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+zz = zz+1;
+   
 % eADC    
 temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies_all(ii).StudyInstanceUID ''' '...
         'and SeriesDescription like ''%Exponential Apparent Diffusion Coefficient%'' '... % Includes ADC and eADC from DWI
         'order by SeriesNumber ASC']);   
-UID = temp_series.SeriesInstanceUID;
-Descrip = strrep(strrep(strrep(strrep(strrep(temp_series.SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-Descrip_UID = sprintf([Descrip '_' UID]);
-img_resample = load_nii([script02_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-voi_values = img_resample.img(voi_idx)*conv_factor;
-voi_mean = mean(voi_values,1);
-voi_std = std(voi_values,0,1);
-voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-h = figure;
-hist(voi_values)
-title([ ptno ' ' site ', ' temp_series.SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-close all
-zz=zz+1;    
-    
+VOI_output2(1e-6, temp_series, rez, ptno, site,  voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+zz = zz+1;
+ 
 % FA
 temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies_all(ii).StudyInstanceUID ''' '...
         'and SeriesDescription like ''%Fractional Aniso%'' '... % Includes FA from DTI
         'order by SeriesNumber ASC']);   
-UID = temp_series.SeriesInstanceUID;
-Descrip = strrep(strrep(strrep(strrep(strrep(strrep(temp_series.SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star'),'.','');
-Descrip_UID = sprintf([Descrip '_' UID]);
-img_resample = load_nii([script02_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-voi_values = img_resample.img(voi_idx)*conv_factor;
-voi_mean = mean(voi_values,1);
-voi_std = std(voi_values,0,1);
-voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-h = figure;
-hist(voi_values)
-title([ ptno ' ' site ', ' temp_series.SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-close all
-zz=zz+1;    
-    
+VOI_output2(1e-6, temp_series, rez, ptno, site,  voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+zz = zz+1;
+ 
 % Avg DC    
 temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies_all(ii).StudyInstanceUID ''' '...
         'and SeriesDescription like ''%Average DC%'' '...  % Includes ADC from DTI
         'order by SeriesNumber ASC']);   
-UID = temp_series.SeriesInstanceUID;
-Descrip = strrep(strrep(strrep(strrep(strrep(temp_series.SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-Descrip_UID = sprintf([Descrip '_' UID]);
-img_resample = load_nii([script02_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-voi_values = img_resample.img(voi_idx)*conv_factor;
-voi_mean = mean(voi_values,1);
-voi_std = std(voi_values,0,1);
-voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-h = figure;
-hist(voi_values)
-title([ ptno ' ' site ', ' temp_series.SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-close all
-zz=zz+1;
+VOI_output2(1e-6, temp_series, rez, ptno, site,  voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+zz = zz+1;
 
     
-%% DSC/DCE
-%rBV
+%% DSC
+%rBV - not corrected
 temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies_all(ii).StudyInstanceUID ''' '...
     'and SeriesDescription like ''%rBV%'' '... % DSC maps
     'and SeriesDescription like ''%not%'' '... % DSC maps
     'order by SeriesNumber ASC']);
 for jj = 1:size(temp_series,1) % will atuomatically pass over if no content in temp_series
     zz
-    UID = temp_series(jj).SeriesInstanceUID;
-    Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-    Descrip_UID = sprintf([Descrip '_' UID]);
-    img_resample = load_nii([script03_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-    voi_values = img_resample.img(voi_idx);
-    voi_mean = mean(voi_values,1);
-    voi_std = std(voi_values,0,1);
-    voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-    h = figure;
-    hist(voi_values)
-    title([ ptno ' ' site ', ' temp_series(jj).SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-    saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-    close all
-    zz=zz+1;
+    VOI_output3(jj, temp_series, rez, ptno, site, voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+    zz = zz+1;
 end
-
 
 %rBV_corr
 temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies_all(ii).StudyInstanceUID ''' '...
@@ -678,22 +587,9 @@ temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies
     'order by SeriesNumber ASC']);
 for jj = 1:size(temp_series,1) % will atuomatically pass over if no content in temp_series
     zz
-    UID = temp_series(jj).SeriesInstanceUID;
-    Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-    Descrip_UID = sprintf([Descrip '_' UID]);
-    img_resample = load_nii([script03_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-    voi_values = img_resample.img(voi_idx);
-    voi_mean = mean(voi_values,1);
-    voi_std = std(voi_values,0,1);
-    voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-    h = figure;
-    hist(voi_values)
-    title([ ptno ' ' site ', ' temp_series(jj).SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-    saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-    close all
-    zz=zz+1;
+    VOI_output3(jj, temp_series, rez, ptno, site, voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+    zz = zz+1;
 end
-
 
 %rBF
 temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies_all(ii).StudyInstanceUID ''' '...
@@ -701,20 +597,8 @@ temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies
     'order by SeriesNumber ASC']);
 for jj = 1:size(temp_series,1) % will atuomatically pass over if no content in temp_series
     zz
-    UID = temp_series(jj).SeriesInstanceUID;
-    Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-    Descrip_UID = sprintf([Descrip '_' UID]);
-    img_resample = load_nii([script03_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-    voi_values = img_resample.img(voi_idx);
-    voi_mean = mean(voi_values,1);
-    voi_std = std(voi_values,0,1);
-    voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-    h = figure;
-    hist(voi_values)
-    title([ ptno ' ' site ', ' temp_series(jj).SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-    saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-    close all
-    zz=zz+1;
+    VOI_output3(jj, temp_series, rez, ptno, site, voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+    zz = zz+1;
 end
 
 % MTT
@@ -723,20 +607,8 @@ temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies
     'order by SeriesNumber ASC']);
 for jj = 1:size(temp_series,1) % will atuomatically pass over if no content in temp_series
     zz
-    UID = temp_series(jj).SeriesInstanceUID;
-    Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-    Descrip_UID = sprintf([Descrip '_' UID]);
-    img_resample = load_nii([script03_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-    voi_values = img_resample.img(voi_idx);
-    voi_mean = mean(voi_values,1);
-    voi_std = std(voi_values,0,1);
-    voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-    h = figure;
-    hist(voi_values)
-    title([ ptno ' ' site ', ' temp_series(jj).SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-    saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-    close all
-    zz=zz+1;
+    VOI_output3(jj, temp_series, rez, ptno, site, voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+    zz = zz+1;
 end
 
 % Delay
@@ -745,20 +617,8 @@ temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies
     'order by SeriesNumber ASC']);
 for jj = 1:size(temp_series,1) % will atuomatically pass over if no content in temp_series
     zz
-    UID = temp_series(jj).SeriesInstanceUID;
-    Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-    Descrip_UID = sprintf([Descrip '_' UID]);
-    img_resample = load_nii([script03_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-    voi_values = img_resample.img(voi_idx);
-    voi_mean = mean(voi_values,1);
-    voi_std = std(voi_values,0,1);
-    voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-    h = figure;
-    hist(voi_values)
-    title([ ptno ' ' site ', ' temp_series(jj).SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-    saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-    close all
-    zz=zz+1;
+    VOI_output3(jj, temp_series, rez, ptno, site, voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+    zz = zz+1;
 end
 
 % K2
@@ -767,43 +627,19 @@ temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies
     'order by SeriesNumber ASC']);
 for jj = 1:size(temp_series,1) % will atuomatically pass over if no content in temp_series
     zz
-    UID = temp_series(jj).SeriesInstanceUID;
-    Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-    Descrip_UID = sprintf([Descrip '_' UID]);
-    img_resample = load_nii([script03_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-    voi_values = img_resample.img(voi_idx);
-    voi_mean = mean(voi_values,1);
-    voi_std = std(voi_values,0,1);
-    voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-    h = figure;
-    hist(voi_values)
-    title([ ptno ' ' site ', ' temp_series(jj).SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-    saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-    close all
-    zz=zz+1;
+    VOI_output3(jj, temp_series, rez, ptno, site, voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+    zz = zz+1;
 end
 
-%%
+%% DCE
 % Ktrans
 temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies_all(ii).StudyInstanceUID ''' '...
     'and SeriesDescription like ''%K12%'' '... % DCE maps
     'order by SeriesDescription DESC']);
 for jj = 1:size(temp_series,1) % will atuomatically pass over if no content in temp_series
     zz
-    UID = temp_series(jj).SeriesInstanceUID;
-    Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-    Descrip_UID = sprintf([Descrip '_' UID]);
-    img_resample = load_nii([script03_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-    voi_values = img_resample.img(voi_idx);
-    voi_mean = mean(voi_values,1);
-    voi_std = std(voi_values,0,1);
-    voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-    h = figure;
-    hist(voi_values)
-    title([ ptno ' ' site ', ' temp_series(jj).SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-    saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-    close all
-    zz=zz+1;
+    VOI_output3(jj, temp_series, rez, ptno, site, voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+    zz = zz+1;
 end
 
 % Kep
@@ -812,20 +648,8 @@ temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies
     'order by SeriesDescription DESC']);
 for jj = 1:size(temp_series,1) % will atuomatically pass over if no content in temp_series
     zz
-    UID = temp_series(jj).SeriesInstanceUID;
-    Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-    Descrip_UID = sprintf([Descrip '_' UID]);
-    img_resample = load_nii([script03_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-    voi_values = img_resample.img(voi_idx);
-    voi_mean = mean(voi_values,1);
-    voi_std = std(voi_values,0,1);
-    voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-    h = figure;
-    hist(voi_values)
-    title([ ptno ' ' site ', ' temp_series(jj).SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-    saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-    close all
-    zz=zz+1;
+    VOI_output3(jj, temp_series, rez, ptno, site, voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+    zz = zz+1;
 end
 
 % Vp
@@ -834,20 +658,8 @@ temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies
     'order by SeriesDescription DESC']);
 for jj = 1:size(temp_series,1) % will atuomatically pass over if no content in temp_series
     zz
-    UID = temp_series(jj).SeriesInstanceUID;
-    Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-    Descrip_UID = sprintf([Descrip '_' UID]);
-    img_resample = load_nii([script03_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-    voi_values = img_resample.img(voi_idx);
-    voi_mean = mean(voi_values,1);
-    voi_std = std(voi_values,0,1);
-    voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-    h = figure;
-    hist(voi_values)
-    title([ ptno ' ' site ', ' temp_series(jj).SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-    saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-    close all
-    zz=zz+1;
+    VOI_output3(jj, temp_series, rez, ptno, site, voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+    zz = zz+1;
 end
 
 % Ve
@@ -856,20 +668,8 @@ temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies
     'order by SeriesDescription DESC']);
 for jj = 1:size(temp_series,1) % will atuomatically pass over if no content in temp_series
     zz
-    UID = temp_series(jj).SeriesInstanceUID;
-    Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-    Descrip_UID = sprintf([Descrip '_' UID]);
-    img_resample = load_nii([script03_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-    voi_values = img_resample.img(voi_idx);
-    voi_mean = mean(voi_values,1);
-    voi_std = std(voi_values,0,1);
-    voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-    h = figure;
-    hist(voi_values)
-    title([ ptno ' ' site ', ' temp_series(jj).SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-    saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-    close all
-    zz=zz+1;
+    VOI_output3(jj, temp_series, rez, ptno, site, voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+    zz = zz+1;
 end
 
 % Wash-in
@@ -878,20 +678,8 @@ temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies
     'order by SeriesDescription DESC']);
 for jj = 1:size(temp_series,1) % will atuomatically pass over if no content in temp_series
     zz
-    UID = temp_series(jj).SeriesInstanceUID;
-    Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-    Descrip_UID = sprintf([Descrip '_' UID]);
-    img_resample = load_nii([script03_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-    voi_values = img_resample.img(voi_idx);
-    voi_mean = mean(voi_values,1);
-    voi_std = std(voi_values,0,1);
-    voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-    h = figure;
-    hist(voi_values)
-    title([ ptno ' ' site ', ' temp_series(jj).SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-    saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-    close all
-    zz=zz+1;
+    VOI_output3(jj, temp_series, rez, ptno, site, voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+    zz = zz+1;
 end
 
 % Wash-out
@@ -900,20 +688,8 @@ temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies
     'order by SeriesDescription DESC']);
 for jj = 1:size(temp_series,1) % will atuomatically pass over if no content in temp_series
     zz
-    UID = temp_series(jj).SeriesInstanceUID;
-    Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-    Descrip_UID = sprintf([Descrip '_' UID]);
-    img_resample = load_nii([script03_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-    voi_values = img_resample.img(voi_idx);
-    voi_mean = mean(voi_values,1);
-    voi_std = std(voi_values,0,1);
-    voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-    h = figure;
-    hist(voi_values)
-    title([ ptno ' ' site ', ' temp_series(jj).SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-    saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-    close all
-    zz=zz+1;
+    VOI_output3(jj, temp_series, rez, ptno, site, voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+    zz = zz+1;
 end
 
 % TTP
@@ -922,20 +698,8 @@ temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies
     'order by SeriesDescription DESC']);
 for jj = 1:size(temp_series,1) % will atuomatically pass over if no content in temp_series
     zz
-    UID = temp_series(jj).SeriesInstanceUID;
-    Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-    Descrip_UID = sprintf([Descrip '_' UID]);
-    img_resample = load_nii([script03_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-    voi_values = img_resample.img(voi_idx);
-    voi_mean = mean(voi_values,1);
-    voi_std = std(voi_values,0,1);
-    voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-    h = figure;
-    hist(voi_values)
-    title([ ptno ' ' site ', ' temp_series(jj).SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-    saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-    close all
-    zz=zz+1;
+    VOI_output3(jj, temp_series, rez, ptno, site, voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+    zz = zz+1;
 end
 
 % AUC
@@ -944,20 +708,8 @@ temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies
     'order by SeriesDescription DESC']);
 for jj = 1:size(temp_series,1) % will atuomatically pass over if no content in temp_series
     zz
-    UID = temp_series(jj).SeriesInstanceUID;
-    Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-    Descrip_UID = sprintf([Descrip '_' UID]);
-    img_resample = load_nii([script03_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-    voi_values = img_resample.img(voi_idx);
-    voi_mean = mean(voi_values,1);
-    voi_std = std(voi_values,0,1);
-    voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-    h = figure;
-    hist(voi_values)
-    title([ ptno ' ' site ', ' temp_series(jj).SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-    saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-    close all
-    zz=zz+1;
+    VOI_output3(jj, temp_series, rez, ptno, site, voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+    zz = zz+1;
 end
 
 % Peak enhancement
@@ -966,22 +718,28 @@ temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies
     'order by SeriesDescription DESC']);
 for jj = 1:size(temp_series,1) % will atuomatically pass over if no content in temp_series
     zz
-    UID = temp_series(jj).SeriesInstanceUID;
-    Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-    Descrip_UID = sprintf([Descrip '_' UID]);
-    img_resample = load_nii([script03_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']); 
-    voi_values = img_resample.img(voi_idx);
-    voi_mean = mean(voi_values,1);
-    voi_std = std(voi_values,0,1);
-    voi_cell(zz,:) = {ptno_site Descrip voi_mean voi_std};
-    h = figure;
-    hist(voi_values)
-    title([ ptno ' ' site ', ' temp_series(jj).SeriesDescription ', mean = ' num2str(voi_mean) ' +/- ' num2str(voi_std)])
-    saveas(h, [script04_prefix_results ptno_site '_Histogram_' Descrip ],'png')
-    close all
-    zz=zz+1;
+    VOI_output3(jj, temp_series, rez, ptno, site, voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+    zz = zz+1;
 end
-save([script04_prefix_results ptno_site '.mat'], 'voi_cell') % Save as .mat files for each site
+
+    % Save voi_cell1 and voi_cell2 as .mat files
+    if choice==1 && rez==1 % Cylinder/Sphere, Original Rez
+        save([script04_prefix_results ptno '_' site '_Cyl_Original.mat'], 'voi_cell1') 
+        save([script04_prefix_results ptno '_' site '_Sphere_Original.mat'], 'voi_cell2') 
+    elseif choice==1 && rez==2 % Cylinder/Sphere, Resampled Rez
+        save([script04_prefix_results ptno '_' site '_Cyl_Resample.mat'], 'voi_cell1') 
+        save([script04_prefix_results ptno '_' site '_Sphere_Resample.mat'], 'voi_cell2') 
+    elseif choice==2 && rez==1 % Forceps/Sphere, Original Rez
+        save([script04_prefix_results ptno '_' site '_Forceps_Original.mat'], 'voi_cell1') 
+        save([script04_prefix_results ptno '_' site '_Sphere_Original.mat'], 'voi_cell2') 
+    elseif choice==2 && rez==2 % Forceps/Sphere, Resampled Rez
+        save([script04_prefix_results ptno '_' site '_Forceps_Resample.mat'], 'voi_cell1') 
+        save([script04_prefix_results ptno '_' site '_Sphere_Resample.mat'], 'voi_cell2') 
+    end
+
+end % end rez outer loop
+
+
 toc/60 % 26.74 min
 
 close all

@@ -5,6 +5,7 @@ close all
 % access SQL interface
 path(path, '/mnt/data/scratch/igilab/jslin1/Matlab_add-ons/mksqlite-1.14')
 path(path, '/mnt/data/scratch/igilab/jslin1/Matlab_add-ons/NIfTI_20140122')
+path(path, '/mnt/data/scratch/igilab/jslin1/RadPath/Functions')
 script01_prefix = 'Script01_T1_T2_SWAN/';
 script02_prefix = 'Script02_DWI_DTI/';
 script03_prefix = 'Script03_DCE_DSC/';
@@ -33,14 +34,14 @@ for kk = 4%1:n_studies_all
     n_temp_series = numel(temp_series);
 
     for jj=1:n_temp_series % for NICE/NNL, Olea DROs
-        SeriesInstanceUID = temp_series(jj).SeriesInstanceUID;
-        SeriesDescription = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
+        UID = temp_series(jj).SeriesInstanceUID;
+        Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
     
-        images   = mksqlite(['select * from Images where SeriesInstanceUID = ''' SeriesInstanceUID ''' order by SOPInstanceUID ASC']);
+        images   = mksqlite(['select * from Images where SeriesInstanceUID = ''' UID ''' order by SOPInstanceUID ASC']);
         pieces = strsplit(images(1).Filename,'/'); % Only works in Matlab 2014a
         halves = strsplit(images(1).Filename,pieces(end)); % Use end fragment to figure out pathname
         pathname1 = halves{1,1};
-        pathname2 = [script03_prefix '00_radpath_raw/DICOMs_Re-numbered/' sprintf(['%02d'],kk) '/' sprintf(['%02d'],kk) '_' SeriesDescription '_lasttimept_DICOMs' ];
+        pathname2 = [script03_prefix '00_radpath_raw/DICOMs_Re-numbered/' sprintf(['%02d'],kk) '/' sprintf(['%02d'],kk) '_' Descrip '_lasttimept_DICOMs' ];
 
         if size(dir([pathname1 '*.dcm']),1)>0
             tmp_pathname = dir([pathname1 '*.dcm']);
@@ -115,15 +116,15 @@ for kk = 4%1:n_studies_all
     n_temp_series = numel(temp_series);
 
     for jj=1:n_temp_series
-        SeriesInstanceUID = temp_series(jj).SeriesInstanceUID;
-        SeriesDescription = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-        file_infix = sprintf(['%02d_' SeriesDescription '_' SeriesInstanceUID],kk);
+        UID = temp_series(jj).SeriesInstanceUID;
+        Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
+        ptno_Descrip_UID = sprintf(['%02d_' Descrip '_' UID],kk);
 
-        images   = mksqlite(['select * from Images where SeriesInstanceUID = ''' SeriesInstanceUID ''' order by Filename ASC' ]);
+        images   = mksqlite(['select * from Images where SeriesInstanceUID = ''' UID ''' order by Filename ASC' ]);
         pieces = strsplit(images(1).Filename,'/'); % Only works in Matlab 2014a
         halves = strsplit(images(1).Filename,pieces(end)); % Use end fragment to figure out pathname
         pathname1 = halves{1,1};
-        pathname2 = [script03_prefix '00_radpath_raw/DICOMs_Re-numbered/' sprintf(['%02d'],kk) '/' sprintf(['%02d'],kk) '_' SeriesDescription '_DICOMs' ];
+        pathname2 = [script03_prefix '00_radpath_raw/DICOMs_Re-numbered/' sprintf(['%02d'],kk) '/' sprintf(['%02d'],kk) '_' Descrip '_DICOMs' ];
 
         if size(dir([pathname1 '*.dcm']),1)>0
             tmp_pathname = dir([pathname1 '*.dcm']);
@@ -150,7 +151,7 @@ end
 
 
 
-%% I. DICOM --> Nifti
+%% Ia. DICOM --> Nifti
 % Start by generating database by setting Local Database directory on Slicer's DICOM
 % database tool, then importing DICOMs
 
@@ -202,25 +203,25 @@ for kk = 4;%1:n_studies
     n_temp_series = numel(temp_series);
     
     for jj = 1:n_temp_series
-        SeriesInstanceUID = temp_series(jj).SeriesInstanceUID;
-        SeriesDescription = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
+        UID = temp_series(jj).SeriesInstanceUID;
+        Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
         fprintf(fid,['\n\njob' num2str(zz) ':\n']);
 
-        if numel(strfind(SeriesDescription,'DCE'))>0 || numel(strfind(SeriesDescription,'DSC'))>0 % If DCE or DSC found, execute this code
-            pathname = [script03_prefix '00_radpath_raw/DICOMs_Re-numbered/' sprintf(['%02d'],kk) '/' sprintf(['%02d'],kk) '_' SeriesDescription '_lasttimept_DICOMs' ];
-            file_infix = sprintf(['%02d_' SeriesDescription '_lasttimept_' SeriesInstanceUID],kk);
+        if numel(strfind(Descrip,'DCE'))>0 || numel(strfind(Descrip,'DSC'))>0 % If DCE or DSC found, execute this code
+            pathname = [script03_prefix '00_radpath_raw/DICOMs_Re-numbered/' sprintf(['%02d'],kk) '/' sprintf(['%02d'],kk) '_' Descrip '_lasttimept_DICOMs' ];
+            ptno_Descrip_UID = sprintf(['%02d_' Descrip '_lasttimept_' UID],kk);
             fprintf(fid, ['\tDicomSeriesReadImageWrite2 '...
             pathname ' '...
-            script03_prefix '00_radpath_raw/radpath_raw_' file_infix '.nii.gz '...
-            SeriesInstanceUID '\n']);
+            script03_prefix '00_radpath_raw/radpath_raw_' ptno_Descrip_UID '.nii.gz '...
+            UID '\n']);
             zz=zz+1;
         else
-            pathname = [script03_prefix '00_radpath_raw/DICOMs_Re-numbered/' sprintf(['%02d'],kk) '/' sprintf(['%02d'],kk) '_' SeriesDescription '_DICOMs' ];    
-            file_infix = sprintf(['%02d_' SeriesDescription '_' SeriesInstanceUID],kk);
+            pathname = [script03_prefix '00_radpath_raw/DICOMs_Re-numbered/' sprintf(['%02d'],kk) '/' sprintf(['%02d'],kk) '_' Descrip '_DICOMs' ];    
+            ptno_Descrip_UID = sprintf(['%02d_' Descrip '_' UID],kk);
             fprintf(fid, ['\tDicomSeriesReadImageWrite2 '...
             pathname ' '...
-            script03_prefix '00_radpath_raw/radpath_raw_' file_infix '.nii.gz '...
-            SeriesInstanceUID '\n']);
+            script03_prefix '00_radpath_raw/radpath_raw_' ptno_Descrip_UID '.nii.gz '...
+            UID '\n']);
             zz=zz+1;
         end
     end
@@ -233,7 +234,9 @@ system(['make -j 9 -f ' script03_prefix 'DICOM_to_NIfTI.makefile'])
 mksqlite('close' ) ;
 
 
-%% Ia. Fix headers of DCE maps and DSC maps - not that time consuming
+%% Ib. Fix headers of DCE maps and DSC maps - not that time consuming
+% So that maps have same coordinate information, so applying a registration
+% will work properly on them
 ii=4;
 series_DCE = mksqlite(['select * from Series where StudyInstanceUID = ''' studies_all(ii).StudyInstanceUID ''' '...
         'and SeriesDescription like ''%DCE%'' '...
@@ -249,15 +252,15 @@ series_DCE_maps =     mksqlite(['select * from Series where StudyInstanceUID = '
         'or SeriesDescription like ''%Area under curve%'' '...
         'or SeriesDescription like ''%Peak enhancement%'')'...
         'order by SeriesDate, SeriesInstanceUID ASC']);
-SeriesInstanceUID = series_DCE.SeriesInstanceUID;
-SeriesDescription = strrep(strrep(strrep(strrep(strrep(series_DCE.SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-DCE_file_infix = sprintf(['%02d_' SeriesDescription '_lasttimept_' SeriesInstanceUID],ii); % patient #, Descrip, SeriesInstanceUID
+UID = series_DCE.SeriesInstanceUID;
+Descrip = strrep(strrep(strrep(strrep(strrep(series_DCE.SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
+DCE_file_infix = sprintf(['%02d_' Descrip '_lasttimept_' UID],ii); % patient #, Descrip, SeriesInstanceUID
 DCE_nii = load_nii([script03_prefix '00_radpath_raw/radpath_raw_' DCE_file_infix '.nii.gz']); 
 
 for jj = 1:size(series_DCE_maps,1)
-    SeriesInstanceUID = series_DCE_maps(jj).SeriesInstanceUID;
-    SeriesDescription = strrep(strrep(strrep(strrep(strrep(series_DCE_maps(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-    DCE_map_file_infix = sprintf(['%02d_' SeriesDescription '_' SeriesInstanceUID],ii); % patient #, Descrip, SeriesInstanceUID 
+    UID = series_DCE_maps(jj).SeriesInstanceUID;
+    Descrip = strrep(strrep(strrep(strrep(strrep(series_DCE_maps(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
+    DCE_map_file_infix = sprintf(['%02d_' Descrip '_' UID],ii); % patient #, Descrip, SeriesInstanceUID 
     DCE_map_nii = load_nii([script03_prefix '00_radpath_raw/radpath_raw_' DCE_map_file_infix '.nii.gz']); 
     DCE_map_nii.hdr = DCE_nii.hdr; 
     save_nii(DCE_map_nii, [script03_prefix '00_radpath_raw/radpath_raw_' DCE_map_file_infix '.nii.gz'])
@@ -274,19 +277,21 @@ series_DSC_maps = mksqlite(['select * from Series where StudyInstanceUID = ''' s
         'or SeriesDescription like ''%Delay%'' '...
         'or SeriesDescription like ''%Leakage (K2)%'')'...
         'order by SeriesDate, SeriesInstanceUID ASC']);
-SeriesInstanceUID = series_DSC.SeriesInstanceUID;
-SeriesDescription = strrep(strrep(strrep(strrep(strrep(series_DSC.SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-DSC_file_infix = sprintf(['%02d_' SeriesDescription '_lasttimept_' SeriesInstanceUID],ii); % patient #, Descrip, SeriesInstanceUID
+UID = series_DSC.SeriesInstanceUID;
+Descrip = strrep(strrep(strrep(strrep(strrep(series_DSC.SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
+DSC_file_infix = sprintf(['%02d_' Descrip '_lasttimept_' UID],ii); % patient #, Descrip, SeriesInstanceUID
 DSC_nii = load_nii([script03_prefix '00_radpath_raw/radpath_raw_' DSC_file_infix '.nii.gz']); 
 
 for jj = 1:size(series_DSC_maps,1)
-    SeriesInstanceUID = series_DSC_maps(jj).SeriesInstanceUID;
-    SeriesDescription = strrep(strrep(strrep(strrep(strrep(series_DSC_maps(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-    DSC_map_file_infix = sprintf(['%02d_' SeriesDescription '_' SeriesInstanceUID],ii); % patient #, Descrip, SeriesInstanceUID 
+    UID = series_DSC_maps(jj).SeriesInstanceUID;
+    Descrip = strrep(strrep(strrep(strrep(strrep(series_DSC_maps(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
+    DSC_map_file_infix = sprintf(['%02d_' Descrip '_' UID],ii); % patient #, Descrip, SeriesInstanceUID 
     DSC_map_nii = load_nii([script03_prefix '00_radpath_raw/radpath_raw_' DSC_map_file_infix '.nii.gz']); 
     DSC_map_nii.hdr = DSC_nii.hdr; 
     save_nii(DSC_map_nii, [script03_prefix '00_radpath_raw/radpath_raw_' DSC_map_file_infix '.nii.gz'])
 end
+
+
 
 %% II. Register DCE/DSC lasttimept to Reference, then apply to all derived maps
 tic
@@ -566,25 +571,25 @@ temp_series = mksqlite(['select * from Series where StudyInstanceUID = ''' studi
         'order by SeriesDate, SeriesInstanceUID ASC']);  
 
 jj=2;
-SeriesInstanceUID = temp_series(jj).SeriesInstanceUID;
-SeriesDescription = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-file_infix = sprintf(['%02d_' SeriesDescription '_' SeriesInstanceUID],ii); % patient #, Descrip, SeriesInstanceUID 
+UID = temp_series(jj).SeriesInstanceUID;
+Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
+ptno_Descrip_UID = sprintf(['%02d_' Descrip '_' UID],ii); % patient #, Descrip, SeriesInstanceUID 
 
 
 system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
     '-g ' script01_prefix '07_HistMatch/Brain_HistMatch_' fixed_series.SeriesInstanceUID '.nii.gz '...
-    '-o ' script03_prefix '10_Warped/Warped_' file_infix '.nii.gz'])
+    '-o ' script03_prefix '10_Warped/Warped_' ptno_Descrip_UID '.nii.gz'])
 
 % for DCE/DSC lasttimept
-file_infix = sprintf(['%02d_' SeriesDescription '_lasttimept_' SeriesInstanceUID],ii); % patient #, Descrip, SeriesInstanceUID 
+ptno_Descrip_UID = sprintf(['%02d_' Descrip '_lasttimept_' UID],ii); % patient #, Descrip, SeriesInstanceUID 
 system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap  '...
-        '-g ' script03_prefix '00_radpath_raw/radpath_raw_' file_infix '.nii.gz']);
+        '-g ' script03_prefix '00_radpath_raw/radpath_raw_' ptno_Descrip_UID '.nii.gz']);
 system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap  '...
-        '-g ' script03_prefix '10_Warped/Warped_' file_infix '.nii.gz']);
+        '-g ' script03_prefix '10_Warped/Warped_' ptno_Descrip_UID '.nii.gz']);
   
 system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
     '-g ' script01_prefix '07_HistMatch/Brain_HistMatch_' fixed_series.SeriesInstanceUID '.nii.gz '...
-    '-o ' script03_prefix '10_Warped/Warped_' file_infix '.nii.gz'])
+    '-o ' script03_prefix '10_Warped/Warped_' ptno_Descrip_UID '.nii.gz'])
 
 
 
@@ -592,6 +597,6 @@ system(['vglrun /opt/apps/SLICER/Slicer-4.3.1-linux-amd64/Slicer'])
 system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap'])
 
 % View Histogram matched Brain-extracted volumes
-system(['vglrun itksnap -g 00_radpath_raw/Brain_HistMatch_' SeriesInstanceUID '.nii.gz'])
+system(['vglrun itksnap -g 00_radpath_raw/Brain_HistMatch_' UID '.nii.gz'])
 
 
