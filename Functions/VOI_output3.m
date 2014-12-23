@@ -15,9 +15,7 @@ function  VOI_output3(jj, temp_series, rez, ptno, site, voi_cell1, voi_cell2, vo
 
     mksqlite('open', 'ctkDICOM.sql' );
 
-    UID = temp_series(jj).SeriesInstanceUID;
-    Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-    Descrip_UID = sprintf([Descrip '_' UID]);
+    [ptno Descrip UID ptno_Descrip_UID] = Generate_Label(temp_series(jj));
     images = mksqlite(['select * from Images where SeriesInstanceUID = ''' UID ''' order by Filename ASC' ]);
     tmp2=dicominfo(images(1).Filename,'dictionary','gems-dicom-dict.txt');
 
@@ -38,8 +36,14 @@ function  VOI_output3(jj, temp_series, rez, ptno, site, voi_cell1, voi_cell2, vo
     voi_cell1(zz,:) = {ptno site Descrip voi_mean1 voi_std1 voi_max1 voi_min1 voi_range1 voi_pix1};
     h = figure;
     hist(voi_values1)
-    title([ ptno ' ' site ', ' temp_series.SeriesDescription ', mean = ' num2str(voi_mean1) ' +/- ' num2str(voi_std1)])
-    saveas(h, [script04_prefix_results ptno '_' site '_Histogram_' Descrip ],'png')
+
+    if rez == 1
+        title([ ptno ' ' site ', ' temp_series.SeriesDescription ', mean = ' num2str(voi_mean1) ' +/- ' num2str(voi_std1) ', # pix = ' num2str(voi_pix1)])
+        saveas(h, [script04_prefix_results ptno '_' site '_Histogram_' Descrip '_Original' ],'png')
+    elseif rez == 2
+        title([ ptno ' ' site ', ' temp_series.SeriesDescription ', mean = ' num2str(voi_mean1) ' +/- ' num2str(voi_std1) ', # pix = ' num2str(voi_pix1)])
+        saveas(h, [script04_prefix_results ptno '_' site '_Histogram_' Descrip '_Resample' ],'png')
+    end
 
     % Sphere
     voi_values2 = img.img(voi_idx2)*tmp2.Private_0077_1001;
@@ -52,8 +56,15 @@ function  VOI_output3(jj, temp_series, rez, ptno, site, voi_cell1, voi_cell2, vo
     voi_cell2(zz,:) = {ptno site Descrip voi_mean2 voi_std2 voi_max2 voi_min2 voi_range2 voi_pix2};
     h = figure;
     hist(voi_values2)
-    title([ ptno ' ' site ', ' temp_series.SeriesDescription ', mean = ' num2str(voi_mean2) ' +/- ' num2str(voi_std2)])
-    saveas(h, [script04_prefix_results ptno '_' site '_Histogram_' Descrip ],'png')
+
+    if rez == 1
+        title([ ptno ' ' site ', ' temp_series.SeriesDescription ', mean = ' num2str(voi_mean2) ' +/- ' num2str(voi_std2) ', # pix = ' num2str(voi_pix2)])
+        saveas(h, [script04_prefix_results ptno '_' site '_Histogram_' Descrip '_Sphere_Original' ],'png')
+    elseif rez == 2
+        title([ ptno ' ' site ', ' temp_series.SeriesDescription ', mean = ' num2str(voi_mean2) ' +/- ' num2str(voi_std2) ', # pix = ' num2str(voi_pix2)])
+        saveas(h, [script04_prefix_results ptno '_' site '_Histogram_' Descrip '_Sphere_Resample' ],'png')
+    end
+
 
     close all
 

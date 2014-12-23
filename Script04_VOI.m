@@ -1,4 +1,5 @@
 %% I. Load stuff
+cd('/mnt/data/scratch/igilab/jslin1/RadPath')
 clear all
 close all
 path(path, '/mnt/data/scratch/igilab/jslin1/Matlab_add-ons/mksqlite-1.14')
@@ -28,6 +29,25 @@ n_T2 = size(series_T2,1);
 n_T2star = size(series_T2star,1);
 n_T2FLAIR = size(series_T2FLAIR,1);
 
+% PTNO, Site, Biopsy#, VCPFLAIR , T2FLAIR coordinates, VCP, T2 coordinates
+point1 = [-15.31 -52.43 60.1]; % ITK kij
+point2 = [-14.75 -52.44 48.11];
+point3 = [-14.00 -52.17 40.61]; % x y z
+start_point = point3;
+site = 'P1C';
+
+ii=4;
+fixed_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies_all(ii).StudyInstanceUID ''' '...
+    'and SeriesDescription like ''%T2%'' '... % Includes T2, T2star, T2FLAIR
+    'and SeriesDescription not like ''%*%'' '... % Exclude T2star
+    'and SeriesDescription not like ''%FLAIR%'' '... % Exclude T2 FLAIR
+    'order by SeriesDate ASC']);
+[Fixed_ptno Fixed_Descrip Fixed_UID Fixed_ptno_Descrip_UID] = Generate_Label(fixed_series);
+Fixed_Descrip_UID = sprintf([ Fixed_Descrip '_' Fixed_UID]); % patient #, Descrip, SeriesInstanceUID
+Fixed_ptno_site = [Fixed_ptno '_' site];
+Fixed_ptno_site_Descrip_UID = [Fixed_ptno '_' site '_' Fixed_Descrip '_' Fixed_UID];
+
+
 % Ctrl+I - Layer Inspector with World (ITK coordinates), use mouse scroll
 % wheel in all 3 views
 % Paintbrush Mode 2nd-to-last button 
@@ -39,6 +59,7 @@ n_T2FLAIR = size(series_T2FLAIR,1);
 % git clone http://github.com/ImageGuidedTherapyLab/ExLib.git
 % chgrp igilab github/
 % ll = list with details
+
 fid = fopen([script04_prefix 'Extract.makefile'],'w');
 fprintf(fid, 'all:');
 for ii=1:n_series_all 
@@ -46,63 +67,85 @@ for ii=1:n_series_all
 end
 
 zz=1;
-for ii = 4 % patient #
-    point1 = [-15.03 -53.67 58.24]; % ITK kij
-    point2 = [-14.37 -52.98 46.27];
-    point3 = [-13.58 -52.37 40.3]; % x y z
-    start_point = point3;
-    site = 'P1C';
-    ptno = sprintf(['%02d'],ii);
-    ptno_site = [ptno '_' site];
-    
+for ii = 4 % patient # 
     StudyInstanceUID = studies_all(ii).StudyInstanceUID;
-    temp_series = mksqlite(['select * from Series where StudyInstanceUID = ''' StudyInstanceUID ''' '...
-        'and SeriesDescription like ''%FLAIR%'' '...
-        'order by SeriesDate ASC']); %15
-    T2FLAIR_SeriesInstanceUID = temp_series.SeriesInstanceUID; % good
+    fixed_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies_all(ii).StudyInstanceUID ''' '...
+        'and SeriesDescription like ''%T2%'' '... % Includes T2, T2star, T2FLAIR
+        'and SeriesDescription not like ''%*%'' '... % Exclude T2star
+        'and SeriesDescription not like ''%FLAIR%'' '... % Exclude T2 FLAIR
+        'order by SeriesDate ASC']);
+    [Fixed_ptno Fixed_Descrip Fixed_UID Fixed_ptno_Descrip_UID] = Generate_Label(fixed_series);
+    Fixed_ptno_site = [Fixed_ptno '_' site];
+    
 
     % Resample at high rez
-    file = load_nii([script01_prefix '07_HistMatch/Brain_HistMatch_' T2FLAIR_SeriesInstanceUID '.nii.gz']);
-    % xyz --> kij
+    file = load_nii([script01_prefix '00_radpath_raw/radpath_raw_' Fixed_ptno_Descrip_UID '.nii.gz']);
     srow_x = file.hdr.hist.srow_x; % [ITK k]
     srow_y = file.hdr.hist.srow_y; % [ITK i]
     srow_z = file.hdr.hist.srow_z; % [ITK j]
-    % ITK xyz -> ITK kij
-    k = double(round(1 + (-start_point(1) - srow_x(4))/srow_x(3))); % ITK k
-    i = double(round(1 + (-start_point(2) - srow_y(4))/srow_y(1))); % ITK i
-    j = double(round(1 + (start_point(3) - srow_z(4))/srow_z(2))); % ITK j
-    extract_side = 12; %mm
-    origin_k = k-(extract_side/abs(srow_x(3)))/2;
-    origin_i = i-(extract_side/abs(srow_y(1)))/2;
-    origin_j = j-(extract_side/abs(srow_z(2)))/2;
-    num_k = extract_side/abs(srow_x(3));
-    num_i = extract_side/abs(srow_y(1));
-    num_j = extract_side/abs(srow_z(2));
+    extract_side = 12; % side length in mm of extracted portion of image
+
+    % World --> Vox
+    % World 1 --> Vox 1/2/3
+    if srow_x(1)~=0 
+        i = 1 + (-start_point(1) - srow_x(4))/srow_x(1); % ITK i
+        origin_i = double(round(i-(extract_side/abs(srow_x(1)))/2));
+        num_i = double(round(extract_side/abs(srow_x(1))));
+    elseif srow_x(2)~=0 
+        j = 1 + (-start_point(1) - srow_x(4))/srow_x(2); % ITK j
+        origin_j = double(round(j-(extract_side/abs(srow_x(2)))/2));
+        num_j = double(round(extract_side/abs(srow_x(2))));
+    elseif srow_x(3)~=0 
+        k = 1 + (-start_point(1) - srow_x(4))/srow_x(3); % ITK k
+        origin_k = double(round(k-(extract_side/abs(srow_x(3)))/2));
+        num_k = double(round(extract_side/abs(srow_x(3))));
+    end
+
+    % World 2, Vox 1/2/3
+    if srow_y(1)~=0 
+        i = 1 + (-start_point(2) - srow_y(4))/srow_y(1); % ITK i
+        origin_i = double(round(i-(extract_side/abs(srow_y(1)))/2));
+        num_i = double(round(extract_side/abs(srow_y(1))));
+    elseif srow_y(2)~=0 
+        j = 1 + (-start_point(2) - srow_y(4))/srow_y(2); % ITK i
+        origin_j = double(round(j-(extract_side/abs(srow_y(2)))/2));
+        num_j = double(round(extract_side/abs(srow_y(2))));
+    elseif srow_y(3)~=0 
+        k = 1 + (-start_point(2) - srow_y(4))/srow_y(3); % ITK i
+        origin_k = double(round(k-(extract_side/abs(srow_y(3)))/2));
+        num_k = double(round(extract_side/abs(srow_y(3))));
+    end
+
+    % World 3, Vox 1/2/3
+    if srow_z(1)~=0 
+        i = 1 + (start_point(3) - srow_z(4))/srow_z(1); % ITK j
+        origin_i = double(round(i-(extract_side/abs(srow_z(1)))/2));
+        num_i = double(round(extract_side/abs(srow_z(1))));
+    elseif srow_z(2)~=0 
+        j = 1 + (start_point(3) - srow_z(4))/srow_z(2); % ITK j
+        origin_j = double(round(j-(extract_side/abs(srow_z(2)))/2));
+        num_j = double(round(extract_side/abs(srow_z(2))));
+    elseif srow_z(3)~=0 
+        k = 1 + (start_point(3) - srow_z(4))/srow_z(3); % ITK j
+        origin_k = double(round(k-(extract_side/abs(srow_z(3)))/2));
+        num_k = double(round(extract_side/abs(srow_z(3))));
+    end 
+            
+    
     extract_origin = [num2str(origin_i) 'x' num2str(origin_j) 'x' num2str(origin_k)];
     extract_size = [num2str(num_i) 'x' num2str(num_j) 'x' num2str(num_k)];
     
-    % T2FLAIR
-    T2FLAIR_SeriesDescription = strrep(strrep(strrep(strrep(strrep(temp_series.SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-    T2FLAIR_file_infix = sprintf([ T2FLAIR_SeriesDescription '_' T2FLAIR_SeriesInstanceUID]); % patient #, Descrip, SeriesInstanceUID
     fprintf(fid,['\n\njob' num2str(zz) ':\n']);
-    fprintf(fid,['\tc3d ' script01_prefix '07_HistMatch/Brain_HistMatch_' T2FLAIR_SeriesInstanceUID '.nii.gz '... % Input filename
+    fprintf(fid,['\tc3d ' script01_prefix '01_N4/Brain_N4_' Fixed_ptno_Descrip_UID '.nii.gz '... % Input filename
     		'-region ' extract_origin 'vox ' extract_size 'vox '... % Origin-ijk dimensions-ijk
             '-type double -noround '...
-    		'-o ' script01_prefix '11_Extract/Extract_' ptno_site '_' T2FLAIR_file_infix '.nii.gz\n']);
-    fprintf(fid,['\tc3d ' script01_prefix '11_Extract/Extract_' ptno_site '_' T2FLAIR_file_infix '.nii.gz '... % Input filename
+    		'-o ' script01_prefix '11_Extract/Extract_' Fixed_ptno_site_Descrip_UID '.nii.gz\n']);
+    fprintf(fid,['\tc3d ' script01_prefix '11_Extract/Extract_' Fixed_ptno_site_Descrip_UID '.nii.gz '... % Input filename
     		'-interpolation NearestNeighbor -resample-mm 0.02x0.02x0.02mm '... % Interpolation type, resampling dimensions
     		'-type double -noround '...
-            '-o ' script01_prefix '12_Resample/Resample_' ptno_site '_' T2FLAIR_file_infix '.nii.gz\n']);
+            '-o ' script01_prefix '12_Resample/Resample_' Fixed_ptno_site_Descrip_UID '.nii.gz\n']);
         
-%         system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-%             '-g ' script01_prefix '10_Warped/Warped_' file_infix '.nii.gz '])
-%         system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-%             '-g ' script01_prefix '11_Extract/Extract_' ptno_site '_' file_infix '.nii.gz'])
-%         system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-%             '-g ' script01_prefix '12_Resample/Resample_' ptno_site '_' T2FLAIR_file_infix '.nii.gz']) 
-        
-        
-        zz=zz+1;
+    zz=zz+1;
 
     % T1,T2,SWAN
     temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies_all(ii).StudyInstanceUID ''' '...
@@ -112,30 +155,19 @@ for ii = 4 % patient #
         'and SeriesDescription not like ''%FLAIR%'' '... % Exclude FLAIR - different save location
         'order by SeriesNumber ASC']);
     for jj = 1:size(temp_series,1) % will atuomatically pass over if no content in temp_series
-        UID = temp_series(jj).SeriesInstanceUID;
-        Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-        Descrip_UID = sprintf([Descrip '_' UID]); % Descrip, SeriesInstanceUID
-        
+        [ptno Descrip UID ptno_Descrip_UID] = Generate_Label(temp_series(jj));
+        ptno_site_Descrip_UID = [ptno '_' site '_' Descrip '_' UID ];
+ 
         fprintf(fid,['\n\njob' num2str(zz) ':\n']);
-        fprintf(fid,['\tc3d ' script01_prefix '10_Warped/Warped_' Descrip_UID '.nii.gz '... % Input filename
+        fprintf(fid,['\tc3d ' script01_prefix '10_Warped/Warped_' ptno_Descrip_UID '.nii.gz '... % Input filename
                 '-region ' extract_origin 'vox ' extract_size 'vox '... % Origin-ijk dimensions-ijk
                 '-type double -noround '...
-                '-o ' script01_prefix '11_Extract/Extract_' ptno_site '_' Descrip_UID '.nii.gz\n']);
-        fprintf(fid,['\tc3d ' script01_prefix '11_Extract/Extract_' ptno_site '_' Descrip_UID '.nii.gz '... % Input filename
+                '-o ' script01_prefix '11_Extract/Extract_' ptno_site_Descrip_UID '.nii.gz\n']);
+        fprintf(fid,['\tc3d ' script01_prefix '11_Extract/Extract_' ptno_site_Descrip_UID '.nii.gz '... % Input filename
                 '-interpolation NearestNeighbor -resample-mm 0.02x0.02x0.02mm '... % Interpolation type, resampling dimensions
                 '-type double -noround '...
-                '-o ' script01_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz\n']);
+                '-o ' script01_prefix '12_Resample/Resample_' ptno_site_Descrip_UID '.nii.gz\n']);
             
-%         system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-%             '-g ' script01_prefix '07_HistMatch/Brain_HistMatch_' T2FLAIR_SeriesInstanceUID '.nii.gz '...
-%             '-o ' script01_prefix '10_Warped/Warped_' file_infix '.nii.gz ' ]) % Check Registration
-%         system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-%             '-g ' script01_prefix '10_Warped/Warped_' file_infix '.nii.gz '])
-%         system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-%             '-g ' script01_prefix '11_Extract/Extract_' ptno_site '_' file_infix '.nii.gz'])
-%         system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-%             '-g ' script01_prefix '12_Resample/Resample_' ptno_site '_' file_infix '.nii.gz']) 
-        
         zz=zz+1;
     end
 
@@ -146,30 +178,19 @@ for ii = 4 % patient #
             'or SeriesDescription like ''%Average DC%'') '...  % Includes ADC from DTI
             'order by SeriesNumber ASC']);
     for jj = 1:size(temp_series,1) % will atuomatically pass over if no content in temp_series
-        UID = temp_series(jj).SeriesInstanceUID;
-        Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-    
-        Descrip_UID = sprintf([Descrip '_' UID]);
+        [ptno Descrip UID ptno_Descrip_UID] = Generate_Label(temp_series(jj));
+        ptno_site_Descrip_UID = [ptno '_' site '_' Descrip '_' UID ];
+        
         fprintf(fid,['\n\njob' num2str(zz) ':\n']);
-        fprintf(fid,['\tc3d ' script02_prefix '10_Warped/Warped_' ptno '_' Descrip_UID '.nii.gz '... % Input filename
+        fprintf(fid,['\tc3d ' script02_prefix '10_Warped/Warped_' ptno_Descrip_UID '.nii.gz '... % Input filename
                 '-region ' extract_origin 'vox ' extract_size 'vox '... % Origin-ijk dimensions-ijk
                 '-type double -noround '...
-                '-o ' script02_prefix '11_Extract/Extract_' ptno_site '_' Descrip_UID '.nii.gz\n']);
-        fprintf(fid,['\tc3d ' script02_prefix '11_Extract/Extract_' ptno_site '_' Descrip_UID '.nii.gz '... % Input filename
+                '-o ' script02_prefix '11_Extract/Extract_' ptno_site_Descrip_UID '.nii.gz\n']);
+        fprintf(fid,['\tc3d ' script02_prefix '11_Extract/Extract_' ptno_site_Descrip_UID '.nii.gz '... % Input filename
                 '-interpolation NearestNeighbor -resample-mm 0.02x0.02x0.02mm '... % Interpolation type, resampling dimensions
                 '-type double -noround '...
-                '-o ' script02_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz\n']);
+                '-o ' script02_prefix '12_Resample/Resample_' ptno_site_Descrip_UID '.nii.gz\n']);
             
-%         system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-%             '-g ' script01_prefix '07_HistMatch/Brain_HistMatch_' T2FLAIR_SeriesInstanceUID '.nii.gz '...
-%             '-o ' script02_prefix '10_Warped/Warped_' ptno '_' file_infix '.nii.gz ' ]) % Check Registration
-%         system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-%             '-g ' script02_prefix '10_Warped/Warped_' ptno '_' file_infix '.nii.gz'])
-%         system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-%             '-g ' script02_prefix '11_Extract/Extract_' ptno_site '_' file_infix '.nii.gz'])
-%         system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-%             '-g ' script02_prefix '12_Resample/Resample_' ptno_site '_' file_infix '.nii.gz']) 
-        
         zz=zz+1;
     end
 
@@ -192,30 +213,19 @@ for ii = 4 % patient #
     	'or SeriesDescription like ''%Peak enhancement%'')'...
         'order by SeriesNumber ASC']);
     for jj = 1:size(temp_series,1) % will atuomatically pass over if no content in temp_series
-        UID = temp_series(jj).SeriesInstanceUID;
-        Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-    
-        Descrip_UID = sprintf([Descrip '_' UID]);
+        [ptno Descrip UID ptno_Descrip_UID] = Generate_Label(temp_series(jj));
+        ptno_site_Descrip_UID = [ptno '_' site '_' Descrip '_' UID ];
+        
         fprintf(fid,['\n\njob' num2str(zz) ':\n']);
-        fprintf(fid,['\tc3d ' script03_prefix '10_Warped/Warped_' ptno '_' Descrip_UID '.nii.gz '... % Input filename
+        fprintf(fid,['\tc3d ' script03_prefix '10_Warped/Warped_' ptno_Descrip_UID '.nii.gz '... % Input filename
                 '-region ' extract_origin 'vox ' extract_size 'vox '... % Origin-ijk dimensions-ijk
                 '-type double -noround '...
-                '-o ' script03_prefix '11_Extract/Extract_' ptno_site '_' Descrip_UID '.nii.gz\n']);
-        fprintf(fid,['\tc3d ' script03_prefix '11_Extract/Extract_' ptno_site '_' Descrip_UID '.nii.gz '... % Input filename
+                '-o ' script03_prefix '11_Extract/Extract_' ptno_site_Descrip_UID '.nii.gz\n']);
+        fprintf(fid,['\tc3d ' script03_prefix '11_Extract/Extract_' ptno_site_Descrip_UID '.nii.gz '... % Input filename
                 '-interpolation NearestNeighbor -resample-mm 0.02x0.02x0.02mm '... % Interpolation type, resampling dimensions
                 '-type double -noround '...
-                '-o ' script03_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz\n']);
-            
-%         system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-%             '-g ' script01_prefix '07_HistMatch/Brain_HistMatch_' T2FLAIR_SeriesInstanceUID '.nii.gz '...
-%             '-o ' script03_prefix '10_Warped/Warped_' ptno '_' file_infix '.nii.gz ']) % Check Registration
-%         system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-%             '-g ' script03_prefix '10_Warped/Warped_' ptno '_' file_infix '.nii.gz'])
-%         system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-%             '-g ' script03_prefix '11_Extract/Extract_' ptno_site '_' file_infix '.nii.gz'])
-%         system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-%             '-g ' script03_prefix '12_Resample/Resample_' ptno_site '_' file_infix '.nii.gz'])     
-            
+                '-o ' script03_prefix '12_Resample/Resample_' ptno_site_Descrip_UID '.nii.gz\n']);
+                 
         zz=zz+1;
     end
 
@@ -226,20 +236,12 @@ fclose(fid);
 system(['make -j 8 -f ' script04_prefix 'Extract.makefile'])
 % 3.88 min
 
-system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-    '-g ' script01_prefix '07_HistMatch/Brain_HistMatch_' T2FLAIR_SeriesInstanceUID '.nii.gz '])
-system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-    '-g ' script04_prefix 'Brain_HistMatch_' T2FLAIR_SeriesInstanceUID '_Extract.nii.gz'])
-system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-    '-g ' script04_prefix 'Brain_HistMatch_' T2FLAIR_SeriesInstanceUID '_Resample.nii.gz']) % 0.6 min
+system(['vglrun /opt/apps/itksnap/itksnap-3.2.0-20141023-Linux-x86_64/bin/itksnap '...
+    '-g ' script01_prefix '01_N4/Brain_N4_' Fixed_ptno_Descrip_UID '.nii.gz '])
 
-
-
-
-
-
-
-
+system(['vglrun /opt/apps/itksnap/itksnap-3.2.0-20141023-Linux-x86_64/bin/itksnap '...
+    '-g ' script01_prefix '01_N4/Brain_N4_' Fixed_ptno_Descrip_UID '.nii.gz '...
+    '-o ' script02_prefix '10_Warped/Warped_' Moving_ptno_Descrip_UID '.nii.gz '])
 
 
 
@@ -247,39 +249,19 @@ system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksna
 
 %% III. Create VOI
 
-ii = 4; % patient #
-point1 = [-15.03 -53.67 58.24]; % ITK kij
-point2 = [-14.37 -52.98 46.27];
-point3 = [-13.58 -52.37 40.3]; % x y z
-start_point = point3;
-
 % Get trajectory line based off 2 points
 ctr_vector1 = point1-point2;
 ctr_vector2 = point2-point3;
 ctr_vector3 = point1-point3;
 ctr_vector_unit = ctr_vector2/norm(ctr_vector2);
+choice = 1; % cylinder = 1, Forceps = 2
 
-% Create labels
-site = 'P1C';
-ptno = sprintf(['%02d'],ii);
-ptno_site = sprintf(['%02d_' site],ii);
-ptno_site_mask = [ptno_site '_Mask'];
-
-temp_series = mksqlite(['select * from Series where StudyInstanceUID = ''' studies_all(ii).StudyInstanceUID ''' '...
-    'and SeriesDescription like ''%FLAIR%'' '...
-    'order by SeriesDate ASC']); %15
-UID = temp_series.SeriesInstanceUID; % good
-Descrip = strrep(strrep(strrep(strrep(strrep(temp_series.SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-Descrip_UID = sprintf([ Descrip '_' UID]); % patient #, Descrip, SeriesInstanceUID
-
-
-for rez = 1 % rez 1 Original, 2 Resampled
+for rez = 1:2 % rez 1 Original, 2 Resampled
 % Resample at high rez
-
 if rez==1
-    file = load_nii([script01_prefix '07_HistMatch/Brain_HistMatch_' UID '.nii.gz']);
+    file = load_nii([script01_prefix '00_radpath_raw/radpath_raw_' Fixed_ptno_Descrip_UID '.nii.gz']);
 elseif rez==2
-    file = load_nii([script01_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz']);
+    file = load_nii([script01_prefix '12_Resample/Resample_' Fixed_ptno_site_Descrip_UID '.nii.gz']);
 end
 
 imgdim = [file.hdr.dime.dim(2:4)]; % # pixels - ijk
@@ -288,10 +270,9 @@ srow_y = file.hdr.hist.srow_y; % [ITK i]
 srow_z = file.hdr.hist.srow_z; % [ITK j]
 mask = zeros(imgdim);
 
-choice = 1; % cylinder = 1, Forceps = 2
 if choice == 1 % Cylinder
     mask_cyl = mask;
-    tt_ctr_limit = 4.5; % height/2 = 9/2 = 4.5 mm
+    tt_ctr_limit = 4.19; % height/2 = 8.38 mm/2 = 4.19 mm
     step = 0.01; % mm
     for tt_ctr  = -tt_ctr_limit:step:tt_ctr_limit % inch along cylinder
         tt_ctr
@@ -305,7 +286,7 @@ if choice == 1 % Cylinder
         v = ctr_vector_unit(2);
         w = ctr_vector_unit(3);
 
-	% Perpendicular vector = [1 1 -(A+B)/C]
+        % Perpendicular vector = [1 1 -(A+B)/C]
         x = 1; 
         y = 1;
         z = -(u + v)/w;
@@ -320,7 +301,7 @@ if choice == 1 % Cylinder
         (c*(u^2+v^2)-w*(a*u+b*v-u*x-v*y-w*z))*(1-ct)+z*ct+(-b*u+a*v-v*x+u*y)*st ]';
         norm_evr=sqrt(sum(edge_vector_rot.^2,2));
         evr_unit = edge_vector_rot./[norm_evr norm_evr norm_evr];
-        edge_limit = .735; % radius = 1.47/2 = .7350
+        edge_limit = .675; % radius = 1.35 mm/2 = 0.675 mm
 
         for tt_edge = -edge_limit:step:edge_limit 
             edge_point = repmat([a b c],size(evr_unit,1),1) + evr_unit*tt_edge;
@@ -328,43 +309,65 @@ if choice == 1 % Cylinder
             y_new = edge_point(:,2); 
             z_new = edge_point(:,3); 
 
-            % ITK xyz -> ITK kij
-            k = double(round(1 + (-x_new - srow_x(4))/srow_x(3))); % ITK k
-            i = double(round(1 + (-y_new - srow_y(4))/srow_y(1))); % ITK i
-            j = double(round(1 + (z_new - srow_z(4))/srow_z(2))); % ITK j
+            % World --> Vox
+            % World 1 --> Vox 1/2/3
+            if srow_x(1)~=0 
+                i = double(round(1 + (-x_new - srow_x(4))/srow_x(1))); % ITK i
+            elseif srow_x(2)~=0 
+                j = double(round(1 + (-x_new - srow_x(4))/srow_x(2))); % ITK j
+            elseif srow_x(3)~=0 
+                k = double(round(1 + (-x_new - srow_x(4))/srow_x(3))); % ITK k
+            end
+            % World 2, Vox 1/2/3
+            if srow_y(1)~=0 
+                i = double(round(1 + (-y_new - srow_y(4))/srow_y(1))); % ITK i
+            elseif srow_y(2)~=0 
+                j = double(round(1 + (-y_new - srow_y(4))/srow_y(2))); % ITK i
+            elseif srow_y(3)~=0 
+                k = double(round(1 + (-y_new - srow_y(4))/srow_y(3))); % ITK i
+            end
+            % World 3, Vox 1/2/3
+            if srow_z(1)~=0 
+                i = double(round(1 + (z_new - srow_z(4))/srow_z(1))); % ITK j
+            elseif srow_z(2)~=0 
+                j = double(round(1 + (z_new - srow_z(4))/srow_z(2))); % ITK j
+            elseif srow_z(3)~=0 
+                k = double(round(1 + (z_new - srow_z(4))/srow_z(3))); % ITK j
+            end 
+
             idx_cyl = sub2ind(size(mask_cyl),i,j,k);
             mask_cyl(idx_cyl)=1; % for close voxels, mask = 1
 
         end % inching along edge vector
     end % inch along center line
 
-    holder_cyl = make_nii(mask,... % Image
+    holder_cyl = make_nii(mask_cyl,... % Image
         [file.hdr.dime.pixdim(2:4)], ... % Pixel dimensions - ijk
         [srow_x(4) srow_y(4) srow_z(4)],... % origin - xyz
-        64,[ptno_site_mask '_Cylinder']); % datatype: 64 = float64 = double, Description
+        64,[Fixed_ptno_site '_Mask_Cylinder']); % datatype: 64 = float64 = double, Description
     holder_cyl.hdr = file.hdr;
 
 elseif choice == 2 % Forceps
     mask_forceps = mask;
     [j_all i_all k_all] = meshgrid(1:imgdim(2),1:imgdim(1),1:imgdim(3));
     
-    % IJK coordinates --> XYZ
+    % Vox --> World
     x_all = -((srow_x(1)*(i_all-1)) + (srow_x(2)*(j_all-1)) + (srow_x(3)*(k_all-1)) + srow_x(4));
     y_all = -((srow_y(1)*(i_all-1)) + (srow_y(2)*(j_all-1)) + (srow_y(3)*(k_all-1)) + srow_y(4));
     z_all = (srow_z(1)*(i_all-1)) + (srow_z(2)*(j_all-1)) + (srow_z(3)*(k_all-1)) + srow_z(4);
     
-    % Calculate XYZ coordinates, check if < 5mm distance from start_point
+    % Calculate World Distance, check if < 1mm distance from start_point
     x_diff = x_all - start_point(1);
     y_diff = y_all - start_point(2);
     z_diff = z_all - start_point(3);
     xyz_dist = sqrt(x_diff.^2+y_diff.^2+z_diff.^2);   
     idx_forceps = find(xyz_dist(:) < .5); % .5 mm radius, 1 mm diameter
-    mask_forceps(idx_sphere)=1; % for close voxels, mask = 1
+    mask_forceps(idx_forceps)=1; % for close voxels, mask = 1
 
-    holder_forceps = make_nii(mask,... % Image
+    holder_forceps = make_nii(mask_forceps,... % Image
         [file.hdr.dime.pixdim(2:4)], ... % Pixel dimensions - ijk
         [srow_x(4) srow_y(4) srow_z(4)],... % origin - xyz
-        64,[ptno_site_mask '_Forceps']); % datatype: 64 = float64 = double, Description
+        64,[Fixed_ptno_site '_Mask_Forceps']); % datatype: 64 = float64 = double, Description
     holder_forceps.hdr = file.hdr;
     
 end
@@ -373,12 +376,12 @@ end
     mask_sphere = mask;
     [j_all i_all k_all] = meshgrid(1:imgdim(2),1:imgdim(1),1:imgdim(3));
     
-    % IJK coordinates --> XYZ
+    % Vox --> World
     x_all = -((srow_x(1)*(i_all-1)) + (srow_x(2)*(j_all-1)) + (srow_x(3)*(k_all-1)) + srow_x(4));
     y_all = -((srow_y(1)*(i_all-1)) + (srow_y(2)*(j_all-1)) + (srow_y(3)*(k_all-1)) + srow_y(4));
     z_all = (srow_z(1)*(i_all-1)) + (srow_z(2)*(j_all-1)) + (srow_z(3)*(k_all-1)) + srow_z(4);
     
-    % Calculate XYZ coordinates, check if < 5mm distance from start_point
+    % Calculate World Distance, check if < 5mm distance from start_point
     x_diff = x_all - start_point(1);
     y_diff = y_all - start_point(2);
     z_diff = z_all - start_point(3);
@@ -386,30 +389,30 @@ end
     idx_sphere = find(xyz_dist(:) < 2.5); % 2.5 mm radius, 5 mm diameter
     mask_sphere(idx_sphere)=1; % for close voxels, mask = 1
     
-    holder_sphere = make_nii(mask,... % Image
+    holder_sphere = make_nii(mask_sphere,... % Image
         [file.hdr.dime.pixdim(2:4)], ... % Pixel dimensions - ijk
         [srow_x(4) srow_y(4) srow_z(4)],... % origin - xyz
-        64,[ptno_site_mask '_Sphere']); % datatype: 64 = float64 = double, Description
+        64,[Fixed_ptno_site '_Mask_Sphere']); % datatype: 64 = float64 = double, Description
     holder_sphere.hdr = file.hdr; % Valid bc I commented out the x_form_nii command in load_nii,which changed qform/sform and applied a transform to the data
 
     % Commented out the hdr qform, sform assignments in save_nii_hdr so it would stop being annoying
-    script04_prefix_results = [script04_prefix 'Results/' ptno '/' ptno_site '/'];
+    script04_prefix_results = [script04_prefix 'Results/' Fixed_ptno '/' Fixed_ptno_site '/'];
     if ~isdir(script04_prefix_results)
         mkdir(script04_prefix_results)
     end
 
     if choice==1 && rez==1 % Cylinder/Sphere, Original Rez
-        save_nii(holder_cyl, [script04_prefix_results ptno_site_mask '_Cyl_Original.nii.gz']) % 2.15 min - Commented out the hdr qform, sform
-        save_nii(holder_sphere, [script04_prefix_results ptno_site_mask '_Sphere_Original.nii.gz']) % 2.15 min - Commented out the hdr qform, sform
+        save_nii(holder_cyl, [script04_prefix_results Fixed_ptno_site '_Mask_Cyl_Original.nii.gz']) % 2.15 min - Commented out the hdr qform, sform
+        save_nii(holder_sphere, [script04_prefix_results Fixed_ptno_site '_Mask_Sphere_Original.nii.gz']) % 2.15 min - Commented out the hdr qform, sform
     elseif choice==1 && rez==2 % Cylinder/Sphere, Resampled Rez
-        save_nii(holder_cyl, [script04_prefix_results ptno_site_mask '_Cyl_Resample.nii.gz']) 
-        save_nii(holder_sphere, [script04_prefix_results ptno_site_mask '_Sphere_Resample.nii.gz']) 
+        save_nii(holder_cyl, [script04_prefix_results Fixed_ptno_site '_Mask_Cyl_Resample.nii.gz']) 
+        save_nii(holder_sphere, [script04_prefix_results Fixed_ptno_site '_Mask_Sphere_Resample.nii.gz']) 
     elseif choice==2 && rez==1 % Forceps/Sphere, Original Rez
-        save_nii(holder_forceps, [script04_prefix_results ptno_site_mask '_Forceps_Original.nii.gz']) 
-        save_nii(holder_sphere, [script04_prefix_results ptno_site_mask '_Sphere_Original.nii.gz']) 
+        save_nii(holder_forceps, [script04_prefix_results Fixed_ptno_site '_Mask_Forceps_Original.nii.gz']) 
+        save_nii(holder_sphere, [script04_prefix_results Fixed_ptno_site '_Mask_Sphere_Original.nii.gz']) 
     elseif choice==2 && rez==2 % Forceps/Sphere, Resampled Rez
-        save_nii(holder_forceps, [script04_prefix_results ptno_site_mask '_Forceps_Resample.nii.gz']) 
-        save_nii(holder_sphere, [script04_prefix_results ptno_site_mask '_Sphere_Resample.nii.gz']) 
+        save_nii(holder_forceps, [script04_prefix_results Fixed_ptno_site '_Mask_Forceps_Resample.nii.gz']) 
+        save_nii(holder_sphere, [script04_prefix_results Fixed_ptno_site '_Mask_Sphere_Resample.nii.gz']) 
     end
 
 
@@ -417,10 +420,11 @@ end % Perform at rez = 1 (Original), then rez = 2 (Resampled)
 
     %%
     system(['vglrun /opt/apps/itksnap/itksnap-3.2.0-20141023-Linux-x86_64/bin/itksnap '...
-        '-g ' script04_prefix ptno_site_mask '_Cyl.nii.gz']) % 1.15 min
+        '-g ' script04_prefix_results Fixed_ptno_site '_Mask_Cyl_Original.nii.gz']) % 1.15 min
+    
     system(['vglrun /opt/apps/itksnap/itksnap-3.2.0-20141023-Linux-x86_64/bin/itksnap '...
         '-g ' file.fileprefix '.nii.gz '...
-        '-s ' script04_prefix ptno_site_mask '_Cyl.nii.gz']) % 1.15 min
+        '-s ' script04_prefix_results Fixed_ptno_site '_Mask_Cyl_Resample.nii.gz']) % 1.15 min
     
     system(['vglrun /opt/apps/itksnap/itksnap-3.2.0-20141023-Linux-x86_64/bin/itksnap '...
         '-g ' script04_prefix_results ptno_site_mask '_Sphere.nii.gz']) % 1.15 min
@@ -466,18 +470,18 @@ for rez = 1:2
 
     if rez == 1
         if choice == 1
-            mask = load_nii([script04_prefix_results ptno_site_mask '_Cyl_Original.nii.gz']); 
+            mask = load_nii([script04_prefix_results Fixed_ptno_site '_Mask_Cyl_Original.nii.gz']); 
         elseif choice == 2
-            mask = load_nii([script04_prefix_results ptno_site_mask '_Forceps_Original.nii.gz']); 
+            mask = load_nii([script04_prefix_results Fixed_ptno_site '_Mask_Forceps_Original.nii.gz']); 
         end
-        mask_sphere = load_nii([script04_prefix_results ptno_site_mask '_Sphere_Original.nii.gz']); 
+        mask_sphere = load_nii([script04_prefix_results Fixed_ptno_site '_Mask_Sphere_Original.nii.gz']); 
     elseif rez == 2
         if choice == 1
-            mask = load_nii([script04_prefix_results ptno_site_mask '_Cyl_Resample.nii.gz']); 
+            mask = load_nii([script04_prefix_results Fixed_ptno_site '_Mask_Cyl_Resample.nii.gz']); 
         elseif choice == 2
-            mask = load_nii([script04_prefix_results ptno_site_mask '_Forceps_Resample.nii.gz']); 
+            mask = load_nii([script04_prefix_results Fixed_ptno_site '_Mask_Forceps_Resample.nii.gz']); 
         end
-        mask_sphere = load_nii([script04_prefix_results ptno_site_mask '_Sphere_Resample.nii.gz']); 
+        mask_sphere = load_nii([script04_prefix_results Fixed_ptno_site '_Mask_Sphere_Resample.nii.gz']); 
     end
 
 voi_idx1=find(mask.img);
@@ -543,28 +547,28 @@ temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies
         'and SeriesDescription like ''%Apparent Diffusion Coefficient%'' '... % Includes ADC and eADC from DWI
         'and SeriesDescription not like ''%Exponential%'' '... % Includes FA from DTI
         'order by SeriesNumber ASC']);
-VOI_output2(1e-6, temp_series, rez, ptno, site,  voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+VOI_output2(1e-6, temp_series, rez, site,  voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
 zz = zz+1;
    
 % eADC    
 temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies_all(ii).StudyInstanceUID ''' '...
         'and SeriesDescription like ''%Exponential Apparent Diffusion Coefficient%'' '... % Includes ADC and eADC from DWI
         'order by SeriesNumber ASC']);   
-VOI_output2(1e-6, temp_series, rez, ptno, site,  voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+VOI_output2(1e-6, temp_series, rez, site,  voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
 zz = zz+1;
  
 % FA
 temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies_all(ii).StudyInstanceUID ''' '...
         'and SeriesDescription like ''%Fractional Aniso%'' '... % Includes FA from DTI
         'order by SeriesNumber ASC']);   
-VOI_output2(1e-6, temp_series, rez, ptno, site,  voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+VOI_output2(1e-6, temp_series, rez, site,  voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
 zz = zz+1;
  
 % Avg DC    
 temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies_all(ii).StudyInstanceUID ''' '...
         'and SeriesDescription like ''%Average DC%'' '...  % Includes ADC from DTI
         'order by SeriesNumber ASC']);   
-VOI_output2(1e-6, temp_series, rez, ptno, site,  voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
+VOI_output2(1e-6, temp_series, rez, site,  voi_cell1, voi_cell2, voi_idx1, voi_idx2, zz)
 zz = zz+1;
 
     
@@ -724,17 +728,17 @@ end
 
     % Save voi_cell1 and voi_cell2 as .mat files
     if choice==1 && rez==1 % Cylinder/Sphere, Original Rez
-        save([script04_prefix_results ptno '_' site '_Cyl_Original.mat'], 'voi_cell1') 
-        save([script04_prefix_results ptno '_' site '_Sphere_Original.mat'], 'voi_cell2') 
+        save([script04_prefix_results Fixed_ptno_site '_Cyl_Original.mat'], 'voi_cell1') 
+        save([script04_prefix_results Fixed_ptno_site '_Sphere_Original.mat'], 'voi_cell2') 
     elseif choice==1 && rez==2 % Cylinder/Sphere, Resampled Rez
-        save([script04_prefix_results ptno '_' site '_Cyl_Resample.mat'], 'voi_cell1') 
-        save([script04_prefix_results ptno '_' site '_Sphere_Resample.mat'], 'voi_cell2') 
+        save([script04_prefix_results Fixed_ptno_site '_Cyl_Resample.mat'], 'voi_cell1') 
+        save([script04_prefix_results Fixed_ptno_site '_Sphere_Resample.mat'], 'voi_cell2') 
     elseif choice==2 && rez==1 % Forceps/Sphere, Original Rez
-        save([script04_prefix_results ptno '_' site '_Forceps_Original.mat'], 'voi_cell1') 
-        save([script04_prefix_results ptno '_' site '_Sphere_Original.mat'], 'voi_cell2') 
+        save([script04_prefix_results Fixed_ptno_site '_Forceps_Original.mat'], 'voi_cell1') 
+        save([script04_prefix_results Fixed_ptno_site '_Sphere_Original.mat'], 'voi_cell2') 
     elseif choice==2 && rez==2 % Forceps/Sphere, Resampled Rez
-        save([script04_prefix_results ptno '_' site '_Forceps_Resample.mat'], 'voi_cell1') 
-        save([script04_prefix_results ptno '_' site '_Sphere_Resample.mat'], 'voi_cell2') 
+        save([script04_prefix_results Fixed_ptno_site '_Forceps_Resample.mat'], 'voi_cell1') 
+        save([script04_prefix_results Fixed_ptno_site '_Sphere_Resample.mat'], 'voi_cell2') 
     end
 
 end % end rez outer loop
@@ -792,8 +796,8 @@ studies_all = mksqlite(['select * from Studies order by StudyDate ASC']);
 ii=4;
 site = 'P1C';
 ptno = sprintf(['%02d'],ii);
-ptno_site = sprintf(['%02d_' site],ii);
-ptno_site_mask = [ptno_site '_Mask'];
+Fixed_ptno_site = sprintf(['%02d_' site],ii);
+ptno_site_mask = [Fixed_ptno_site '_Mask'];
 
 % Anatomical
 temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies_all(ii).StudyInstanceUID ''' '...
@@ -814,7 +818,7 @@ system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksna
 %     '-s ' script04_prefix mask_title '.nii.gz']) % 1.15 min
 
 system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-    '-g ' script01_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz '...
+    '-g ' script01_prefix '12_Resample/Resample_' Fixed_ptno_site '_' Descrip_UID '.nii.gz '...
     '-s ' script04_prefix ptno_site_mask '_Resample.nii.gz']) % 1.15 min
 % Bad registration - T1
 % 4.8X
@@ -833,7 +837,7 @@ system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksna
     '-g ' script02_prefix '10_Warped/Warped_' ptno '_' Descrip_UID '.nii.gz '...
     '-s ' script04_prefix ptno_site_mask '.nii.gz']) % 1.15 min
 system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-    '-g ' script02_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz '...
+    '-g ' script02_prefix '12_Resample/Resample_' Fixed_ptno_site_Descrip_UID '.nii.gz '...
     '-s ' script04_prefix ptno_site_mask '_Resample.nii.gz']) % 1.15 min
 
 % DSC/DCE
@@ -868,7 +872,7 @@ system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksna
     '-s ' script04_prefix ptno_site_mask '.nii.gz']) % 1.15 min
 
 system(['vglrun /opt/apps/itksnap/itksnap-3.0.0-20140425-Linux-x86_64/bin/itksnap '...
-    '-g ' script03_prefix '12_Resample/Resample_' ptno_site '_' Descrip_UID '.nii.gz '...
+    '-g ' script03_prefix '12_Resample/Resample_' Fixed_ptno_site_Descrip_UID '.nii.gz '...
     '-s ' script04_prefix ptno_site_mask '_Resample.nii.gz']) % 1.15 min
 
 
