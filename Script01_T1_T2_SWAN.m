@@ -22,63 +22,44 @@ series_T1post = mksqlite(['select * from Series where SeriesDescription like ''%
 series_T2 = mksqlite(['select * from Series where SeriesDescription like ''%T2%'' and SeriesDescription not like ''%*%'' and SeriesDescription not like ''%FLAIR%'' order by SeriesDate ASC']); %17
 series_T2star = mksqlite(['select * from Series where SeriesDescription like ''%T2*%'' order by SeriesDate ASC']); %17
 series_T2FLAIR = mksqlite(['select * from Series where SeriesDescription like ''%FLAIR%'' order by SeriesDate ASC']); %17
-
-n_series_all = size(series_all,1);
-n_studies_all = size(studies_all,1);
-n_SWAN = size(series_SWAN,1);
-n_T1 = size(series_T1,1);
-n_T1post = size(series_T1post,1);
-n_T2 = size(series_T2,1);
-n_T2star = size(series_T2star,1);
-n_T2FLAIR = size(series_T2FLAIR,1);
+series_T1_T2_SWAN = mksqlite(['select * from Series where '...
+        'SeriesDescription like ''%T1%'' '... % Includes T1, T1post
+        'or SeriesDescription like ''%T2%'' '... % Includes T2, T2star, T2FLAIR
+        'or SeriesDescription like ''%SWAN%'' '... % Includes SWAN Image volume
+        'order by SeriesDate ASC']);
+    
 prefix = script01_prefix;
-
-
-
+series_T2_register = series_T2([2:8 10:size(series_T2,1)]); % Ptno 1, 7 - High rez T2 post
+series_T2_HistMatch = series_T2([1 3:7 9:size(series_T2,1)]); % Ptno 1, 7 - lower rez T2
 
 %% I. Convert DICOM --> Nifti
-
-fid = fopen([script01_prefix 'DICOM_to_NIfTI.makefile'],'w');
+n_cores = 9;
+dicom_series = series_T1_T2_SWAN;
+makefile = 'DICOM_to_NIfTI.makefile';
+fid = fopen([prefix makefile],'w');
 fprintf(fid, 'all:');
-for ii=1:n_series_all 
+for ii=1:size(dicom_series,1)
     fprintf(fid, [' job' num2str(ii)]);
 end
 
-zz=1;
-for ii = 1:n_studies_all
-    
-    StudyInstanceUID = studies_all(ii).StudyInstanceUID;
-    temp_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies_all(ii).StudyInstanceUID ''' '...
-        'and (SeriesDescription like ''%T1%'' '... % Includes T1, T1post
-        'or SeriesDescription like ''%T2%'' '... % Includes T2, T2star, T2FLAIR
-        'or SeriesDescription like ''%SWAN%'') '... % Includes SWAN Image volume
-        'order by SeriesNumber ASC']);
-    numel(temp_series)
-    for jj = 1:numel(temp_series) % will atuomatically pass over if no content in temp_series
-        UID = temp_series(jj).SeriesInstanceUID;
-        Descrip = strrep(strrep(strrep(strrep(strrep(temp_series(jj).SeriesDescription,' ','_'),'(','_'),')','_'),'/','_'),'*','star');
-        ptno_Descrip_UID = sprintf(['%02d_' Descrip '_' UID],ii); % patient #, Descrip, SeriesInstanceUID
-        fprintf(fid,['\n\njob' num2str(zz) ':\n']);
+for jj = 1:size(dicom_series,1) 
+    fprintf(fid,['\n\njob' num2str(jj) ':\n']);
 
-        images   = mksqlite(['select * from Images where SeriesInstanceUID = ''' UID '''' ]);
-        pieces = strsplit(images(1).Filename,'/'); % Only works in Matlab 2014a
-        halves = strsplit(images(1).Filename,pieces(end)); % Use end fragment to figure out pathname
-        pathname = halves{1,1};
+    [ptno Descrip UID ptno_Descrip_UID] = Generate_Label(dicom_series(jj));
+    images   = mksqlite(['select * from Images where SeriesInstanceUID = ''' UID '''' ]);
+    pieces = strsplit(images(1).Filename,'/'); % Only works in Matlab 2014a
+    halves = strsplit(images(1).Filename,pieces(end)); % Use end fragment to figure out pathname
+    pathname = strrep(halves{1,1},' ','_');
 
-        % Convert 1 series to Nifti - Command Source_Directory Output_Filename SeriesInstanceUID(to ensure only that series is used)
-        fprintf(fid, ['\tDicomSeriesReadImageWrite2 ' pathname ' '...
-            script01_prefix '00_radpath_raw/radpath_raw_' ptno_Descrip_UID '.nii.gz '...
-            UID '\n']);
-        zz=zz+1;
-    end
+    % Convert 1 series to Nifti - Command Source_Directory Output_Filename SeriesInstanceUID(to ensure only that series is used)
+    fprintf(fid, ['\tDicomSeriesReadImageWrite2 '...
+        pathname ' '...
+        prefix '00_radpath_raw/radpath_raw_' ptno_Descrip_UID '.nii.gz '...
+        UID '\n']);
 end
 
 fclose(fid);
-system(['make -j 8 -f ' script01_prefix 'DICOM_to_NIfTI.makefile'])
-
-mksqlite('close' ) ;
-
-
+system(['make -j ' num2str(n_cores) ' -f ' prefix makefile])
 
 %% II. Perform Histogram Matching via these steps:
 n_cores = 10;
@@ -95,8 +76,9 @@ N4(series_SWAN,     prefix, 'SWAN_N4.makefile',    n_cores)
 
 
 %% 2. Registration to T2 Volume
-
-fixed_series = series_T2;
+% Re-do for ptno's [1 7] 
+tic
+fixed_series = series_T2_register; % Exclude Ax T2 24 slices sequence for ptno 7
 Register1(prefix, 'T1_Register.makefile',      n_cores, fixed_series, series_T1,      series_T1)
 Register1(prefix, 'T1post_Register.makefile',  n_cores, fixed_series, series_T1post,  series_T1post)
 Register1(prefix, 'T2star_Register.makefile',  n_cores, fixed_series, series_T2star,  series_T2star)
@@ -118,7 +100,9 @@ time_hrs = time_min/60 % 27.6 hrs
 Create_Mask(prefix, 'T1_Create_Mask.makefile'      , n_cores, series_T1,      MD_parameter, MC_parameter)
 Create_Mask(prefix, 'T1post_Create_Mask.makefile'  , n_cores, series_T1post,  MD_parameter, MC_parameter)
 Create_Mask(prefix, 'T2star_Create_Mask.makefile'  , n_cores, series_T2star,  MD_parameter, MC_parameter)
+tic
 Create_Mask(prefix, 'T2FLAIR_Create_Mask.makefile' , n_cores, series_T2FLAIR, MD_parameter, MC_parameter)
+time_hrs = toc/60/60 
 Create_Mask(prefix, 'SWAN_Create_Mask.makefile'    , n_cores, series_SWAN,    MD_parameter, MC_parameter)
 
 
@@ -149,7 +133,7 @@ clear T1_cume
 save_nii(T1post_cume,[prefix 'T1post_cume.nii.gz'])
 clear T1post_cume 
 
-[T2_cume] = Generate_Cume(prefix, series_T2);
+[T2_cume] = Generate_Cume(prefix, series_T2_HistMatch); % Only use the ptno 7 AxT2 24 slice
 save_nii(T2_cume,[prefix 'T2_cume.nii.gz')
 clear T2_cume 
 

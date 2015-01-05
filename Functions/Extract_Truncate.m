@@ -5,7 +5,7 @@ for ii=1:size(mask_series,1)
 [m_ptno m_Descrip m_UID m_ptno_Descrip_UID] = Generate_Label(mask_series(ii));
 [e_field e_study]= find(cell2mat(cellfun(@(x) isequal(x,mask_series(ii).StudyInstanceUID),struct2cell(extract_series),'UniformOutput',false)));
 
-for jj = e_study
+for jj = e_study'
     [e_ptno e_Descrip e_UID e_ptno_Descrip_UID] = Generate_Label(extract_series(jj));
     % 1. Extract Brain
     system(['/opt/apps/ANTsR/dev//ANTsR_src/ANTsR/src/ANTS/ANTS-build//bin/MultiplyImages 3 '...

@@ -4,30 +4,76 @@ function ptno=mrn_to_ptno(mrn)
 switch str2num(mrn)
     case 957098 %1st Patient's MRN
         ptno='01'; % The 1st patient
+    case 01 
+        ptno='957098'; % finding the reverse
+
     case 1000086
         ptno='02';
+    case 02
+        ptno='1000086';
+
     case 1007969
         ptno='03';
+    case 03 
+        ptno='1007969';
+
     case 1008684
         ptno='04';
+    case 04
+        ptno='1008684';
+
     case 1024274
         ptno='05';
+    case 05 
+        ptno='1024274';
+
     case 1028588
-        ptno='06';    
+        ptno='06';
+    case 06 
+        ptno='1028588';
+
+    
     case 1029145
-        ptno='07';   
+        ptno='07';
+    case 07 
+        ptno='1029145';
+
+   
     case 1031525
         ptno='08';
+    case 08 
+        ptno='1031525';
+
     case 1035444 % Heart trouble
         ptno='09';    
+    case 09 
+        ptno='1035444';
+
+
     case 1044389
         ptno='10';   
+    case 10 
+        ptno='1044389';
+
+
     case 1055892 % Sylvian fissure complication
         ptno='11';   
+    case 11 
+        ptno='1055892';
+
+
     case 1069507 % Head mvmt
         ptno='12';  
+    case 12 
+        ptno='1069507';
+
+
     case 1072129
         ptno='13';  
+    case 13 
+        ptno='1072129';
+
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%        
 % For the AQ, NNL, Olea, QT comparison - borrowed from earlier study
     case 847879
@@ -46,14 +92,30 @@ switch str2num(mrn)
         ptno='anoq16'; 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-     case 1072634
+    case 1072634
          ptno='14';
-     case 1075421
-         ptno='15';    
-     case 1085919
+    case 14
+        ptno='1072634';
+
+
+    case 1075421
+         ptno='15';  
+    case 15 
+        ptno='1075421';
+
+  
+    case 1085919
          ptno='16'; 
-     case 1080775
+    case 16 
+        ptno='1085919';
+
+
+    case 1080775
          ptno='17';
+    case 17 
+        ptno='1080775';
+
+
 %     case 
 %         ptno='18';    
 %     case 

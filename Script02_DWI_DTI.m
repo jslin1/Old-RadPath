@@ -15,18 +15,17 @@ mksqlite('open', 'ctkDICOM.sql' );
 series_all = mksqlite(['select * from Series order by SeriesDate ASC']);
 studies_all = mksqlite(['select * from Studies order by StudyDate ASC']);
 
-
-series_DWI_DTI = mksqlite(['select * from Series where '...
-        '(SeriesDescription like ''%Apparent Diffusion Coefficient%'' '... % Includes ADC and eADC from DWI
+series_maps = mksqlite(['select * from Series where '...
+        'SeriesDescription like ''%Apparent Diffusion Coefficient%'' '... % Includes ADC and eADC from DWI
         'or SeriesDescription like ''%Fractional Aniso%'' '... % Includes FA from DTI
-        'or SeriesDescription like ''%Average DC%'') '...  % Includes ADC from DTI
-        'order by SeriesNumber ASC']);
+        'or SeriesDescription like ''%Average DC%'' '...  % Includes ADC from DTI
+        'order by SeriesDate ASC']);
 
-fixed_series = mksqlite(['select * from Series where StudyInstanceUID=''' studies_all(ii).StudyInstanceUID ''' '...
-        'and SeriesDescription like ''%T2%'' '... % Includes T2, T2star, T2FLAIR
+series_T2 = mksqlite(['select * from Series where '...
+        'SeriesDescription like ''%T2%'' '... % Includes T2, T2star, T2FLAIR
         'and SeriesDescription not like ''%*%'' '... % Exclude T2star
         'and SeriesDescription not like ''%FLAIR%'' '... % Exclude T2 FLAIR
-        'order by SeriesNumber ASC']);
+        'order by SeriesDate ASC']);
 series_ADC = mksqlite(['select * from Series where '...
         'SeriesDescription like ''%Apparent Diffusion Coefficient%'' '... % Includes ADC and eADC from DWI
         'and SeriesDescription not like ''%Exponential%'' '... % Exclude eADC
@@ -42,59 +41,41 @@ series_AvgDC_FA = mksqlite(['select * from Series where '...
        'or SeriesDescription like ''%Fractional Aniso%'' '...
        'order by SeriesDate, SeriesInstanceUID ASC']);
 
-n_studies_all = size(studies_all,1);
-n_series_all = size(series_all,1);
-n_series_DWI_DTI = size(series_DWI_DTI,1);
 prefix = script02_prefix;
-
-
+series_T2_register = series_T2([2:8 10:size(series_T2,1)]); % T2+C
 
 %% I. DICOM --> Nifti
-
-fid = fopen([script02_prefix 'DICOM_to_NIfTI.makefile'],'w');
+n_cores = 9;
+makefile = 'DICOM_to_NIfTI.makefile';
+fid = fopen([prefix makefile],'w');
 fprintf(fid, 'all:');
-for ii=1:n_series_all
+for ii=1:size(series_maps,1)
     fprintf(fid, [' job' num2str(ii)]);
 end
 
-zz=1;
-for ii = 1:n_studies_all
+for jj = 1:size(series_maps,1) 
+    fprintf(fid,['\n\njob' num2str(jj) ':\n']);
     
-    temp_series = mksqlite(['select * from Series where StudyInstanceUID = ''' studies_all(ii).StudyInstanceUID ''' '...
-            'and (SeriesDescription like ''%Apparent Diffusion Coefficient%'' '... % Includes ADC and eADC from DWI
-            'or SeriesDescription like ''%Fractional Aniso%'' '... % Includes FA from DTI
-            'or SeriesDescription like ''%Average DC%'') '...  % Includes ADC from DTI
-            'order by SeriesNumber ASC']);
-    
-    for jj = 1:size(temp_series,1) % will atuomatically pass over if no content in temp_series
-        [ptno Descrip UID ptno_Descrip_UID] = Generate_Label(temp_series(jj));
-     
-        fprintf(fid,['\n\njob' num2str(zz) ':\n']);
+    [ptno Descrip UID ptno_Descrip_UID] = Generate_Label(series_maps(jj));
+    images   = mksqlite(['select * from Images where SeriesInstanceUID = ''' UID '''' ]);
+    pieces = strsplit(images(1).Filename,'/'); % Only works in Matlab 2014a
+    halves = strsplit(images(1).Filename,pieces(end)); % Use end fragment to figure out pathname
+    pathname = strrep(halves{1,1},' ','_');
 
-        images   = mksqlite(['select * from Images where SeriesInstanceUID = ''' UID '''' ]);
-        pieces = strsplit(images(1).Filename,'/'); % Only works in Matlab 2014a
-        halves = strsplit(images(1).Filename,pieces(end)); % Use end fragment to figure out pathname
-        pathname = halves{1,1};
-
-        % Convert 1 series to Nifti - Command Source_Directory Output_Filename SeriesInstanceUID(to ensure only that series is used)
-        pathname=strrep(pathname,' ','_');
-        fprintf(fid, ['\tDicomSeriesReadImageWrite2 ' pathname ' '...
-            script02_prefix '00_radpath_raw/radpath_raw_' ptno_Descrip_UID '.nii.gz '...
-            UID '\n']);
-        zz=zz+1;
-    end
+    % Convert 1 series to Nifti - Command Source_Directory Output_Filename SeriesInstanceUID(to ensure only that series is used)
+    fprintf(fid, ['\tDicomSeriesReadImageWrite2 ' ...
+        pathname ' '...
+        prefix '00_radpath_raw/radpath_raw_' ptno_Descrip_UID '.nii.gz '...
+        UID '\n']);
 end
-    
+
 fclose(fid);
-system(['make -j 8 -f ' script02_prefix 'DICOM_to_NIfTI.makefile'])
-
-mksqlite('close' ) ;
-
-
+system(['make -j ' num2str(n_cores) ' -f ' prefix makefile])
 
 %% II. Register ADC map to reference, then apply to DWI-derived maps (ADC, eADC)
 tic
 n_cores = 10;
+fixed_series = series_T2_register;
 Register2(prefix, 'DWI_register.makefile', n_cores, fixed_series, series_ADC, series_ADC_eADC)
 Register2(prefix, 'DTI_register.makefile', n_cores, fixed_series, series_AvgDC, series_AvgDC_FA)
 time_s = toc
