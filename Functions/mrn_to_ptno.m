@@ -4,49 +4,49 @@ function ptno=mrn_to_ptno(mrn)
 switch str2num(mrn)
     case 957098 %1st Patient's MRN
         ptno='01'; % The 1st patient
-    case 01 
+    case 1 
         ptno='957098'; % finding the reverse
 
     case 1000086
         ptno='02';
-    case 02
+    case 2
         ptno='1000086';
 
     case 1007969
         ptno='03';
-    case 03 
+    case 3 
         ptno='1007969';
 
     case 1008684
         ptno='04';
-    case 04
+    case 4
         ptno='1008684';
 
     case 1024274
         ptno='05';
-    case 05 
+    case 5 
         ptno='1024274';
 
     case 1028588
         ptno='06';
-    case 06 
+    case 6 
         ptno='1028588';
 
     
     case 1029145
         ptno='07';
-    case 07 
+    case 7 
         ptno='1029145';
 
    
     case 1031525
         ptno='08';
-    case 08 
+    case 8 
         ptno='1031525';
 
     case 1035444 % Heart trouble
         ptno='09';    
-    case 09 
+    case 9 
         ptno='1035444';
 
 

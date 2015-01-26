@@ -1,5 +1,24 @@
-function mask_cyl = Mask_Cyl(ii, point_info, x_all)
+function mask_cyl = Mask_Cyl(ii, point_info, series_sql, x_all, x_step,y_step,z_step,side)
 
+path(path, '/mnt/data/scratch/igilab/jslin1/RadPath/Functions')
+load_sql
+
+%% ptno --> Correct sql entry
+studies_all = mksqlite(['select * from Studies order by StudyDate ASC']);
+
+% Ptno -> StudyInstanceUID -> series_sql entry
+ptno = cell2mat(point_info(ii,1));
+% series_sql = series_T2_Register; % for troubleshooting
+[field study]= find(cell2mat(cellfun(@(x) isequal(studies_all(str2num(ptno)).StudyInstanceUID,x),struct2cell(series_sql),'UniformOutput',false)));
+[ptno Descrip UID ptno_Descrip_UID] = Generate_Label(series_sql(study));
+
+% Load srow_xyz
+file = load_nii([ script01_prefix '01_N4/N4_' ptno_Descrip_UID '.nii.gz' ]);
+srow_x = file.hdr.hist.srow_x; % [ITK k]
+srow_y = file.hdr.hist.srow_y; % [ITK i]
+srow_z = file.hdr.hist.srow_z; % [ITK j]
+
+% Point and vcp info
 point = cell2mat(point_info(ii,4:6));
 vcp = cell2mat(point_info(ii,7));
 
@@ -12,14 +31,14 @@ elseif ischar(vcp) % '01-P1C'
     vcp_num = cell2mat(point_info(idx_row,4:6)); % Find/oad correct row
 end
 ctr_vector = point-vcp_num;
-ctr_vector_unit = ctr_vector/norm(ctr_vector);
+ctr_vector_unit = ctr_vector/sqrt(sum(ctr_vector.^2,2));
 
 %% Needle/Cylinder
 mask_cyl = zeros(size(x_all)); % .02 Vox mask
-tt_ctr_limit = 0%4.19; % height/2 = 8.38 mm/2 = 4.19 mm
-step = 0.01; % mm
-for tt_ctr  = -tt_ctr_limit:step:tt_ctr_limit % inch along cylinder
-    tt_ctr
+tt_ctr_limit = 4.5; % height/2 = 9mm/2 = 4.5 and NOT 8.38 mm/2 = 4.19 mm
+cyl_step = 0.01; % mm
+for tt_ctr  = -tt_ctr_limit:cyl_step:tt_ctr_limit % inch along cylinder
+    tt_ctr;
     ctr_point = point + ctr_vector_unit*tt_ctr;
     a = ctr_point(1); % Point on line
     b = ctr_point(2);
@@ -45,9 +64,9 @@ for tt_ctr  = -tt_ctr_limit:step:tt_ctr_limit % inch along cylinder
     (c*(u^2+v^2)-w*(a*u+b*v-u*x-v*y-w*z))*(1-ct)+z*ct+(-b*u+a*v-v*x+u*y)*st ]';
     norm_evr=sqrt(sum(edge_vector_rot.^2,2));
     evr_unit = edge_vector_rot./[norm_evr norm_evr norm_evr];
-    edge_limit = .1%.675; % radius = 1.35 mm/2 = 0.675 mm
+    edge_limit = .735; % radius = 1.47mm/2 = .735 mm
 
-    for tt_edge = -edge_limit:step:edge_limit 
+    for tt_edge = -edge_limit:cyl_step:edge_limit 
         edge_point = repmat([a b c],size(evr_unit,1),1) + evr_unit*tt_edge;
         x_new = edge_point(:,1); 
         y_new = edge_point(:,2); 
